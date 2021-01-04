@@ -769,7 +769,7 @@ p = plot_tsne(tm,th,pct.exp=.6,perp=3,iter=1500, seed=2,
     guides(shape=guide_legend(order=1))
 fp = glue('{dirw}/10.tsne.pdf')
 ggsave(p, file=fp, width=5, height=5)
-fp = glue('{dirf}/sf01.pdf')
+fp = glue('{dirf}/sf03b.pdf')
 ggsave(p, file=fp, width=5, height=5)
 #}}}
 
