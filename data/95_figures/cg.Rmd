@@ -1,0 +1,76 @@
+---
+title: "maize CAGE-seq manuscript figures and tables"
+output:
+  pdf_document:
+    citation_package: natbib
+    keep_tex: false
+    fig_caption: true
+    latex_engine: lualatex
+# author:
+# - name: Peng Zhou
+#  affiliation: University of Minnesota
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+fontsize: 11pt
+geometry: "left=0.5in,right=0.5in,top=0.8in,bottom=0.5in"
+# spacing: double
+# biblio-style: apsr
+header-includes:
+- \PassOptionsToPackage{table}{xcolor}
+- \usepackage{fontspec}
+- \setmainfont[Scale=MatchUppercase]{TeX Gyre Heros}
+- \usepackage{caption}
+- \usepackage{booktabs}
+- \usepackage{longtable}
+- \usepackage{array}
+- \usepackage{multirow}
+- \usepackage[table]{xcolor}
+- \usepackage{wrapfig}
+- \usepackage{float}
+- \usepackage{colortbl}
+- \usepackage{tabu}
+- \usepackage{threeparttable}
+- \usepackage{threeparttablex}
+- \usepackage[normalem]{ulem}
+- \usepackage{makecell}
+- \captionsetup[figure]{labelformat=empty}
+- \captionsetup[table]{labelformat=empty}
+- \AtBeginDocument{\let\maketitle\relax}
+- \usepackage{lscape}
+- \newcommand{\blandscape}{\begin{landscape}}
+- \newcommand{\elandscape}{\end{landscape}}
+---
+\pagenumbering{gobble}
+
+```{r, message=FALSE, echo=FALSE}
+dirf = '/home/springer/zhoux379/projects/cage/data/95_figures/plots'
+options(tinytex.verbose = TRUE)
+```
+
+\hfill
+
+![](plots/f1.pdf){width=60%}
+
+Figure 1. 
+
+
+\pagebreak
+
+
+Figure S1. 
+
+\pagebreak
+![](plots/sf02.pdf){width=50%}
+
+Figure S2. TSS shape comparison between maize and three other species.
+
+
+\pagebreak
+![](plots/sf03.pdf){width=50%}
+
+Figure S3. CAGE tag mapping rates for B73 and A632 samples.
+
+\pagebreak
+Table 1. TSSs identified in the study.
+```{r, message=FALSE, echo=FALSE}
+readRDS(file.path(dirf, 'st1.rds'))
+```

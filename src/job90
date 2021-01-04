@@ -1,0 +1,9 @@
+#PBS -l nodes=1:ppn=1,mem=10gb,walltime=10:00:00
+#PBS -m ae
+#PBS -M zhoux379@umn.edu
+#PBS -q small
+
+cd $cg/src
+source activate cage
+
+Rscript --no-init-file --no-restore cg.job.90.R

@@ -1,0 +1,21 @@
+#PBS -l nodes=1:ppn=8,mem=150gb,walltime=8:00:00
+#PBS -m ae
+#PBS -M zhoux379@umn.edu
+#PBS -q amdsmall
+
+source activate cage
+cd $cg/raw
+
+sid='s01,s11,s68'
+sid='x'
+computeMatrix scale-regions -p 8 \
+  -R $ref/50_annotation/15.bed \
+  -S 34_ctss/*.bw \
+  -b 2500 -a 2500 \
+  --binSize 50 \
+  --regionBodyLength 5000 \
+  --skipZeros -o $sid.gz \
+  --outFileNameMatrix $sid.tab \
+  --outFileSortedRegions $sid.bed
+#plotProfile --numPlotsPerRow 2 -m $sid.gz -o $sid.pdf
+  #--unscaled5prime 3000 --unscaled3prime 3000 \
