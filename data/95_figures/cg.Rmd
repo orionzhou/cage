@@ -75,6 +75,13 @@ Figure S3. CAGE tag mapping rates for B73 and A632 samples.
 
 Figure S3b. t-SNE clustering of all samples.
 
+
+\pagebreak
+![](plots/f2.pdf){width=100%}
+
+Figure 2. Shifting scores.
+
+
 \pagebreak
 Table 1. TSSs identified in the study.
 ```{r, message=FALSE, echo=FALSE}

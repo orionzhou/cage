@@ -4,4 +4,6 @@ dirw = glue("{dird}/12_tata")
 setwd(dirw)
 
 fi = 'tata.txt'
-y = read_uniprobe(fi)
+mtfs = read_uniprobe(fi)
+fo = 'tata.meme'
+write_meme(mtfs, fo)

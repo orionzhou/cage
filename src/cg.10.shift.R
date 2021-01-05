@@ -6,19 +6,15 @@ setwd(dirw)
 fi = glue('{dird}/03_qc/05.shift.rds')
 r5 = readRDS(fi)
 tss = r5$tss; gtss = r5$gtss
-conds4 = c('Br','Bs','Ar','As')
 gene = gcfg$gene %>% mutate(loc=glue("{chrom}:{start}-{end}")) %>% select(gid,loc)
-#
-#tss %>% mutate(x=map_int(cmp,length)) %>% count(x, ncond4)
-gtss %>% mutate(x=map_int(cmp,length)) %>% count(x, ncond4)
-#
+
 itvs = c(seq(0,1,by=.1))
-tags = c("conserved",'somewhat similar','variable')
+tags = c("conserved",'variable','highly variable')
 tg = gtss %>% select(i,gid, cmp) %>% unnest(cmp) %>%
-    mutate(comp = str_c(cond1,cond2,sep="_")) %>%
-    mutate(comp = as_factor(comp)) %>%
-    arrange(comp, desc(shift)) %>%
-    group_by(comp) %>%
+    mutate(cmp = glue("{cond1} {cond2}")) %>%
+    mutate(cmp = as.character(cmp)) %>%
+    arrange(cmp, desc(shift)) %>%
+    group_by(cmp) %>%
     mutate(rank.shift=1:n()) %>% ungroup() %>%
     #arrange(comp, pval.ks.raw) %>%
     #group_by(comp) %>%
@@ -31,69 +27,99 @@ tg = gtss %>% select(i,gid, cmp) %>% unnest(cmp) %>%
     #mutate(sig.ks = padj < 0.05) %>%
     mutate(tag = ifelse(shift>.5, tags[3], ifelse(shift<=.1, tags[1], tags[2]))) %>%
     mutate(tag = factor(tag, levels=tags))
+tg %>% count(cond1,cond2,tag) %>% spread(tag,n)
 #}}}
 
 #{{{ shifting score distribution
-comps4 = c("Bs_Br","As_Ar", "Bs_As", "Br_Ar")
-#{{{ scatter plot
+#{{{ scatter plot - f2a & b
 require(hexbin)
-tp = tg %>% filter(comp %in% comps4) %>% select(i,gid,comp,shift) %>%
-    spread(comp, shift)
-tp1 = tp %>% select(i, x=Bs_As,y=Br_Ar) %>% mutate(ctag='x=Bs_As y=Br_Ar')
-tp2 = tp %>% select(i, x=Bs_Br,y=As_Ar) %>% mutate(ctag='x=Bs_Br y=As_Ar')
-tp = rbind(tp1,tp2) %>% filter(!is.na(x), !is.na(y))
-tpl = tp %>% group_by(ctag) %>% nest() %>% ungroup() %>%
-    mutate(fit = map(data, ~ lm(y~x, data=.x))) %>%
-    mutate(tidied = map(fit, glance))%>%
-    unnest(tidied) %>%
-    mutate(lab = glue("adjusted R<sup>2</sup> = {number(adj.r.squared,accuracy=.01)}"))
 
-p = ggplot(tp, aes(x=x,y=y)) +
-    #geom_point(aes(x=x, y=y), alpha=.8, size=1) +
-    #geom_text(data=tps, aes(x=bin.shift, y=n+100, label=n), vjust=0, size=2.5) +
-    #geom_vline(xintercept=, linetype='dashed', size=.5) +
-    geom_hex(bins=80) +
-    geom_richtext(data=tpl, aes(x=.5,y=1,label=lab,hjust=.5,vjust=1), size=2.5) +
-    scale_x_continuous(name='',breaks=c(.1,.5),expand=expansion(mult=c(.02,.02))) +
-    scale_y_continuous(name='',breaks=c(.1,.5),expand=expansion(mult=c(.02,.02))) +
-    scale_fill_viridis(direction=-1) +
-    #scale_fill_manual(name='', values=pal_npg()(3)[c(3,2,1)]) +
-    facet_wrap(ctag~., nrow=1) +
-    otheme(legend.pos='top.center.out', legend.title=T, legend.dir='h',
-           legend.box='h', legend.vjust=-.5, panel.spacing=.3,
-           xtext=T, xtick=T, xtitle=F, ytitle=F, ytext=T, ytick=T,
-           xgrid=T, ygrid=T) + o_margin(.3,.3,.3,.3)
+x='Br Bs'; y='Ar As'; ctag='genotype-wise'
+x='As Bs'; y='Ar Br'; ctag='tissue-wise'
+plot_point_dens <- function(tg, x, y, ctag, cmps) {
+    #{{{
+    tp = tg %>% filter(cmp %in% c(x,y)) %>%
+        select(i,gid,cmp,shift) %>%
+        spread(cmp, shift) %>%
+        select(i, x=eval(x), y=eval(y)) %>% mutate(ctag=!!ctag)
+    tpl = tp %>% group_by(ctag) %>% nest() %>% ungroup() %>%
+        mutate(fit = map(data, ~ lm(y~x, data=.x))) %>%
+        mutate(tidied = map(fit, glance))%>%
+        unnest(tidied) %>%
+        mutate(lab = glue("adjusted R<sup>2</sup> = {number(adj.r.squared,accuracy=.01)}"))
+    xlab = cmps %>% filter(cmp==x) %>% pull(cmp.l) %>% as.character()
+    ylab = cmps %>% filter(cmp==y) %>% pull(cmp.l) %>% as.character()
+    #
+    ggplot(tp, aes(x=x,y=y)) +
+        #geom_point(aes(x=x, y=y), alpha=.8, size=1) +
+        #geom_text(data=tps, aes(x=bin.shift, y=n+100, label=n), vjust=0, size=2.5) +
+        #geom_vline(xintercept=, linetype='dashed', size=.5) +
+        geom_hex(bins=80) +
+        geom_richtext(data=tpl, aes(x=.5,y=1,label=lab,hjust=.5,vjust=1), size=2.5) +
+        scale_x_continuous(name=xlab,breaks=c(.1,.5),expand=expansion(mult=c(.02,.02))) +
+        scale_y_continuous(name=ylab,breaks=c(.1,.5),expand=expansion(mult=c(.02,.02))) +
+        scale_fill_viridis(name='density', direction=-1) +
+        #scale_fill_manual(name='', values=pal_npg()(3)[c(3,2,1)]) +
+        facet_wrap(ctag~., nrow=1) +
+        otheme(legend.pos='bottom.right', legend.title=T, legend.dir='v',
+               legend.box='h', legend.vjust=-.5, panel.spacing=.3,
+               xtext=T, xtick=T, xtitle=T, ytitle=T, ytext=T, ytick=T,
+               xgrid=T, ygrid=T) + o_margin(.3,.3,.3,.3)
+    #}}}
+}
+p1 = plot_point_dens(tg, x='Br Bs', y='Ar As', ctag='genotype-wise', cmps)
+p2 = plot_point_dens(tg, x='As Bs', y='Ar Br', ctag='tissue-wise', cmps)
+
 fo = glue("{dirw}/10.shift.comp.pdf")
-ggsave(p, file=fo, width=8, height=4.5)
+#ggsave(p, file=fo, width=8, height=4.5)
+fo = glue("{dirf}/f2a.rds")
+saveRDS(p1, fo)
+fo = glue("{dirf}/f2b.rds")
+saveRDS(p2, fo)
 #}}}
 
-tp = tg %>%
-    filter(comp %in% comps4) %>%
-    count(comp, bin.shift, tag)
-tps = tp %>% group_by(comp,bin.shift) %>% summarise(n=sum(n)) %>% ungroup()
-#{{{ bar plot
+#{{{ bar plot - f2c
+tp = tg %>% filter(cmp %in% cmps5 | cmp %in% cmps4) %>%
+    count(cmp, tag) %>%
+    inner_join(cmps %>% select(cmp,cmp.l), by='cmp') %>%
+    rename(tag1=cmp.l,tag2=tag)
+p = cmp_proportion1(tp, xangle=30, ytext=T, legend.title='TC type:',
+                    lab.size=2, fills = cols_shift) +
+    o_margin(.1,.3,.1,.3) +
+    theme(legend.position='none')
+fo = glue("{dirf}/f2c.rds")
+saveRDS(p, fo)
+#}}}
+
+#{{{ bar plot - sf0x
+tp = tg %>% filter(cmp %in% cmps5 | cmp %in% cmps4) %>%
+    count(cmp, bin.shift, tag) %>%
+    inner_join(cmps %>% select(cmp,cmp.l), by='cmp')
+tps = tp %>% group_by(cmp.l,bin.shift) %>% summarise(n=sum(n)) %>% ungroup()
 p = ggplot(tp) +
-    geom_col(aes(x=bin.shift, y=n, fill=tag), alpha=.8) +
+    geom_col(aes(x=bin.shift, y=n, fill=tag), width=.8, alpha=1) +
     geom_text(data=tps, aes(x=bin.shift, y=n+100, label=n), vjust=0, size=2.5) +
     #geom_vline(xintercept=, linetype='dashed', size=.5) +
-    scale_x_discrete(name='shifting score', expand=expansion(mult=c(.02,.02))) +
-    scale_y_continuous(name='num. genes', expand=expansion(mult=c(0,.05))) +
-    scale_fill_manual(name='', values=pal_npg()(3)[c(3,2,1)]) +
-    facet_wrap(comp~., nrow=2) +
-    otheme(legend.pos='top.center.out', legend.title=T, legend.dir='h',
+    scale_x_discrete(name='shifting score', expand=expansion(add=c(1,1))) +
+    scale_y_continuous(name='number genes', expand=expansion(mult=c(.02,.05))) +
+    scale_fill_manual(name='TC type', values=cols_shift) +
+    facet_wrap(cmp.l~., nrow=2) +
+    otheme(legend.pos='bottom.right', legend.title=T, legend.dir='v',
            legend.box='h', legend.vjust=-.5, panel.spacing=.3,
            xtext=T, xtick=T, xtitle=T, ytitle=T, ytext=T, ytick=T,
-           xgrid=F, ygrid=F) + o_margin(1,.3,.3,.3) +
+           xgrid=F, ygrid=F) + o_margin(.3,.3,.3,.3) +
     theme(axis.text.x=element_text(angle=30, hjust=1,vjust=1))
 fo = glue("{dirw}/10.shift.gene.pdf")
-ggsave(p, file=fo, width=6, height=6)
+ggsave(p, file=fo, width=8, height=4)
+fo = glue("{dirf}/sf0x.pdf")
+#ggsave(p, file=fo, width=9, height=6)
 #}}}
 
-tp0 %>% group_by(comp) %>% summarise(n_pass=sum(shift>=.5), n_total=n()) %>%
+tp0 %>% group_by(cmp) %>% summarise(n_pass=sum(shift>=.5), n_total=n()) %>%
     ungroup() %>% mutate(pct_pass = percent(n_pass/n_total, accuracy=.1))
-tp0 %>% filter(comp %in% c("Br_Ar",'Bs_As'), shift>=.5) %>% count(i) %>% count(n)
-tp0 %>% filter(comp %in% c("As_Ar",'Bs_Br'), shift>=.5) %>% count(i) %>% count(n)
-tpv = tp0 %>% filter(comp %in% c("Br_Ar",'Bs_As'), shift>=.5) %>%
+tp0 %>% filter(cmp %in% c("Br_Ar",'Bs_As'), shift>=.5) %>% count(i) %>% count(n)
+tp0 %>% filter(cmp %in% c("As_Ar",'Bs_Br'), shift>=.5) %>% count(i) %>% count(n)
+tpv = tp0 %>% filter(cmp %in% c("Br_Ar",'Bs_As'), shift>=.5) %>%
     mutate(cond = str_sub(cond1, 2, 2)) %>%
     group_by(i,gid) %>% summarise(conds = str_c(cond, collapse=',')) %>%
     ungroup()
@@ -102,11 +128,10 @@ tp0 %>% filter(shift<.05, padj>=.5) %>% count(gid) %>% count(n)
 #}}}
 
 #{{{ characterize  stable TSSs
-comps4 = c("Bs_Br","As_Ar", "Bs_As", "Br_Ar")
-x = tg %>%
-    filter(comp %in% comps4) %>%
+stb = tg %>% filter(cmp %in% cmps5) %>%
     filter(tag == 'conserved') %>%
-    count(i, gid) %>% filter(n==4) %>%
+    count(i, gid) %>% filter(n==5) %>%
+    mutate(tag = 'stable') %>%
     inner_join(tgl, by='gid') %>% print(n=30)
 
 #{{{ GO
@@ -116,11 +141,11 @@ tgo = read_go(src='uniprot.plants')
 tgrp = tgo %>% select(gotype, grp=goid, gid, note=goname) %>%
     group_by(gotype) %>% nest() %>% rename(tgrp = data)
 
-tg = tgl %>% rename(group=tag) %>%
+x0 = stb %>% rename(group = tag) %>%
     group_by(group) %>% summarise(gids = list(gid)) %>% ungroup() %>%
     crossing(tgrp) %>%
     mutate(x = map2(gids, tgrp, hyper_enrich))
-x = tg %>% select(group,gotype,x) %>% unnest(x) %>%
+x1 = x0 %>% select(group,gotype,x) %>% unnest(x) %>%
     arrange(group, pval.raw) %>%
     select(-grp) %>%
     group_by(group) %>% slice(1:15) %>% ungroup() %>% select(-group,-gotype) %>%
@@ -129,37 +154,69 @@ x = tg %>% select(group,gotype,x) %>% unnest(x) %>%
 x$note[[1]]
 #}}}
 
+#{{{ shape
+fi = glue("{dird}/03_qc/02.tss.gtss.cond.rds")
+r2 = readRDS(fi)
+iqr2shape <- function(iqr, opt='l') {
+    #{{{
+    if (opt == 's') {
+        vals = shapess
+    } else {
+        vals = shapes
+    }
+    ifelse(iqr==0, vals[1], ifelse(iqr <= 10, vals[2], vals[3]))
+    #}}}
+}
+gtss = r2$gtss %>% rename(iqr=IQR) %>%
+    mutate(shape = map_chr(iqr, iqr2shape)) %>%
+    mutate(shape.s = map_chr(iqr, iqr2shape, opt='s')) %>%
+    mutate(shape = factor(shape, levels=shapes)) %>%
+    mutate(shape.s = factor(shape.s, levels=shapess))
+
+tp = gtss %>% select(gid,tag2=shape.s) %>%
+    left_join(stb %>% select(gid,tag1=tag), by='gid') %>%
+    replace_na(list(tag1='non-stable')) %>%
+    count(tag1,tag2)
+p1 = cmp_proportion1(tp,ytext=T, oneline=T, ypos='right',legend.pos='none',
+    fills = pal_npg()(5)) +
+    o_margin(.1,.5,.1,.5)
+fo = file.path(dirw, "32.shape.pdf")
+ggsave(p1, file=fo, width=4, height=4)
+#}}}
+
 #{{{ tis-specificity
 ti = read_tsv('~/projects/rnaseq/data/11_qc/Zmays_B73/rnc01/30.tis.expression.tsv.gz')
 tiss = unique(ti$etag)[c(4,3,1,2)]
 tp0 = ti %>% select(tag2=etag, gid) %>% mutate(tag2=factor(tag2, levels=tiss))
 
-tpc = tp0 %>% count(tag2) %>% mutate(tag1='ctrl-bg')
-tp = tgl %>% rename(tag1=tag) %>%
+tpc = tp0 %>% count(tag2) %>% mutate(tag1='all genes')
+tp = stb %>% rename(tag1=tag) %>%
     inner_join(tp0, by='gid') %>%
     count(tag1, tag2) %>%
     bind_rows(tpc) %>%
     mutate(tag1 = as_factor(tag1))
-p1 = cmp_proportion1(tp,xangle=0, oneline=T,legend.title='', barwidth=.8)
+p1 = cmp_proportion1(tp,ytext=T, oneline=T, ypos='right',legend.pos='none',
+    fills = brewer.pal(5,'Set2')) +
+    o_margin(.1,.1,.1,.1)
 fo = file.path(dirw, "32.tis.pdf")
 ggsave(p1, file=fo, width=4, height=4)
 #}}}
 
 #{{{ syn
 t_syn = read_syn(gcfg) %>% arrange(gid, -ftype) %>% group_by(gid) %>% slice(1) %>% ungroup()
-tp0 = tgl %>% rename(ctag=tag)
+tp0 = stb %>% rename(ctag=tag)
 
-tpc = t_syn %>% count(ftype) %>% mutate(tag1='ctrl-bg') %>% rename(tag2=ftype)
+tpc = t_syn %>% count(ftype) %>% mutate(tag1='all genes') %>% rename(tag2=ftype)
 tp = tp0 %>%
     inner_join(t_syn, by='gid') %>%
     rename(tag1=ctag, tag2=ftype) %>% count(tag1, tag2) %>%
     bind_rows(tpc) %>%
     mutate(tag1 = as_factor(tag1))
-p1 = cmp_proportion1(tp,xangle=0, oneline=T,legend.title='synteny:') +
-    otheme(legend.pos='top.center.out', legend.dir='v', xtext=T) +
-    o_margin(4.5,.2,0,.2)
+p1 = cmp_proportion1(tp,ytext=T, oneline=T, ypos='right',legend.pos='none',
+    fills = brewer.pal(5,'Set3')) +
+    o_margin(.1,.1,.1,.1)
 fo = file.path(dirw, "31.syn.pdf")
-ggsave(p1, file=fo, width=4, height=5)
+ggsave(p1, file=fo, width=4, height=4)
 #}}}
 
 #{{{ utr5 length
@@ -170,10 +227,10 @@ tg0 = gcfg$gene.loc %>% group_by(gid, ttype) %>%
     mutate(tag2 = ifelse(size.utr5 == 0, "UTR5 = 0", "UTR5 > 0"))
 #tg0 = tg0 %>% filter(size.utr5 > 0)
 
-tpc = tg0 %>% mutate(tag1='ctrl-bg') %>% select(gid,tag1,tag2)
+tpc = tg0 %>% mutate(tag1='all genes') %>% select(gid,tag1,tag2)
 tp = tg0 %>% mutate(tag1='stable') %>%
-    inner_join(tgl, by='gid') %>%
-    replace_na(list(tag1 = 'ctrl-bg')) %>%
+    inner_join(stb, by='gid') %>%
+    replace_na(list(tag1 = 'all genes')) %>%
     bind_rows(tpc) %>%
     count(tag1, tag2) %>%
     mutate(tag1 = as_factor(tag1)) %>%
@@ -182,7 +239,7 @@ p1 = cmp_proportion1(tp,xangle=0, oneline=T,legend.title='', barwidth=.8)
 fo = file.path(dirw, "33.utr5.1.pdf")
 ggsave(p1, file=fo, width=3, height=4)
 
-tpc = tg0 %>% mutate(tag1='ctrl-bg') %>% select(gid,tag1,size.utr5)
+tpc = tg0 %>% mutate(tag1='all genes') %>% select(gid,tag1,size.utr5)
 tp = tg0 %>% mutate(tag1='stable') %>%
     inner_join(tgl, by='gid') %>%
     bind_rows(tpc) %>%

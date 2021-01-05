@@ -111,45 +111,6 @@ fo = glue("{dirw}/01.tss.gtss.rds")
 saveRDS(r1, fo)
 #}}}
 
-#{{{ [old] check TSS ovlp w. TEs
-fo = glue("{dirw}/t1.bed")
-to = tss %>% select(chrom,start,end,i) %>% mutate(start=start-1)
-write_tsv(to, fo, col_names=F)
-
-system(glue('intersectBed -u -f 0.5 -a t1.bed -b ~/projects/genome/data2/TE/11.B73.bed > t2.bed'))
-ti2 = read_tsv('t2.bed', col_names=c('chrom','start','end','i')) %>%
-    select(i) %>% mutate(te = 'TE')
-
-ttypes = gcfg$gene %>% distinct(ttype) %>% arrange(ttype) %>% pull(ttype)
-ttypes = c(ttypes[c(3,1,2,4:12)], 'intergenic','antisense')
-ptypes = c(levels(tss$peakType), 'TE', 'non-TE')
-tss2 = tss %>% left_join(gcfg$gene %>% select(gid,ttype), by='gid') %>%
-    left_join(ti2, by=c('i')) %>%
-    replace_na(list(te='non-TE')) %>%
-    mutate(ttype = ifelse(peakType %in% c('intergenic','antisense'), as.character(peakType), ttype)) %>%
-    mutate(ptype = ifelse(peakType %in% c('intergenic','antisense'), te, as.character(peakType))) %>%
-    mutate(ttype = factor(ttype, levels=ttypes)) %>%
-    mutate(ptype = factor(ptype, levels=ptypes))
-tss2 %>% count(ttype, ptype) %>% spread(ttype, n) %>% print(n=20, width=Inf)
-
-tp = tss2 %>%
-    rename(tag1=ttype,tag2=ptype) %>% count(tag1, tag2)
-p = cmp_proportion1(tp, xangle=15, oneline=F, legend.title='', expand.x=c(.05,.05),
-    margin.l=2, fills=pal_simpsons()(11)) +
-    o_margin(1.5,.3,.01,1.5)
-#
-fo = glue("{dirw}/08.te.prop.pdf")
-ggsave(p, file=fo, width=5, height=5)
-p = cmp_cnt1(tp, xangle=15, oneline=F, legend.title='', expand.x=c(.05,.05),
-    margin.l=2, fills=pal_simpsons()(11)) +
-    o_margin(1.5,.3,.01,1.5)
-#
-fo = glue("{dirw}/08.te.cnt.pdf")
-ggsave(p, file=fo, width=5, height=5)
-#fo = glue("{dirf}/sf02b.rds")
-#saveRDS(p, fo)
-#}}}
-
 #{{{ subset to B73 TSS & gTSS
 fi = glue("{dirw}/01.tss.gtss.rds")
 r1 = readRDS(fi)
@@ -565,6 +526,34 @@ x3 %>% count(peakType, freq) %>% spread(freq, n)
 x3 %>% count(peakType, freq) %>% group_by(freq) %>% mutate(p=n/sum(n)) %>% ungroup() %>% select(-n) %>% spread(freq, p)
 #}}}
 
+#{{{ sample clustering t-SNE - sf03b
+fi = glue("{dirw}/02.tss.gtss.cond.rds")
+r2 = readRDS(fi)
+tss=r2$tss; gtss=r2$gtss
+tcond = thf %>% rename(cond=cond.s,gt=Genotype,tis=Tissue) %>% distinct(cond,gt,tis)
+#
+th = thf %>% mutate(grp = glue("{Genotype} {Tissue}")) %>%
+    group_by(grp) %>% mutate(idx = 1:n()) %>% ungroup() %>%
+    mutate(clab=ifelse(idx==1, grp, ''))
+
+res = rnaseq_cpm_raw(yid)
+#tm = assay(SE_tss, 'TPM') %>% as_tibble() %>% mutate(gid = glue("g{1:n()}")) %>%
+    #gather(SampleID, value, -gid) %>%
+    #mutate(value=asinh(value))
+tm = res$tm %>% filter(SampleID %in% th$SampleID) %>%
+    mutate(value=asinh(CPM))
+
+p = plot_tsne(tm,th,pct.exp=.6,perp=3,iter=1500, seed=2,
+    var.shape='Genotype', var.col='Tissue', var.ellipse='grp', var.lab='clab',
+    shapes=c(15,16,4), legend.pos='top.right', legend.dir='v', pal.col='aaas') +
+    theme(legend.box='horizontal', legend.margin=margin(.5,.5,0,0,'lines')) +
+    guides(shape=guide_legend(order=1))
+fp = glue('{dirw}/10.tsne.pdf')
+ggsave(p, file=fp, width=5, height=5)
+fp = glue('{dirf}/sf03b.pdf')
+ggsave(p, file=fp, width=5, height=5)
+#}}}
+
 #{{{ TSS support in tissue/genotypes
 fi = glue("{dirw}/02.tss.gtss.cond.rds")
 r2 = readRDS(fi)
@@ -627,13 +616,12 @@ tia = ti %>% filter(gt == 'A632', s=='E') %>% distinct(i, tag) %>%
 #}}}
 #}}}
 
+
 #{{{ merge replicates & make counts table for TSSs & gTSSs
-fi = glue("{dirw}/01.tss.rds")
+fi = glue("{dirw}/01.tss.gtss.rds")
 r1 = readRDS(fi)
-SE_ctss=r1$SE_ctss; SE_tss=r1$SE_tss; tss=r1$tss
-fi = glue("{dirw}/02.gtss.rds")
-r2 = readRDS(fi)
-SE_gtss=r2$SE_gtss; gtss=r2$gtss
+SE_ctss=r1$SE_ctss; SE_tss=r1$SE_tss; tss=r1$tss; SE_gtss=r1$SE_gtss; gtss=r1$gtss
+tcond = thf %>% rename(cond=cond.s,gt=Genotype,tis=Tissue) %>% distinct(cond,gt,tis)
 
 #{{{ make replicate-merged ctss object
 rowsum1 <- function(sids, ctss) rowSums(assay(ctss[,sids],'counts'))
@@ -667,10 +655,11 @@ tic = assay(SE_ctss_m, 'counts') %>% as_tibble() %>%
     arrange(i, cond) %>%
     mutate(npos = map_int(cnts, length)) %>%
     group_by(i, npos, cidxs) %>% nest() %>% rename(cnts=data) %>% ungroup() %>%
-    select(i,npos,cidxs,cnts)
+    select(i,npos,cidxs,cnts) %>%
+    rename(tidx = i) %>% mutate(tidx=glue("t{tidx}"))
 #}}}
-tss2 = tss %>% inner_join(tic, by=c('i')) %>%
-    select(i,tpm,IQR,support,tid,peakType,gid,npos,everything())
+tss2 = tss %>% inner_join(tic, by=c('tidx')) %>%
+    select(tidx,tpm,IQR,support,tid,peakType,gid,npos,everything())
 
 #{{{ gTSS - merge replicates
 ti = findOverlaps(SE_ctss_m, rowRanges(SE_gtss)) %>% as_tibble() %>%
@@ -686,10 +675,11 @@ tic = assay(SE_ctss_m, 'counts') %>% as_tibble() %>%
     arrange(i, cond) %>%
     mutate(npos = map_int(cnts, length)) %>%
     group_by(i, npos, cidxs) %>% nest() %>% rename(cnts=data) %>% ungroup() %>%
-    select(i,npos,cidxs,cnts)
+    select(i,npos,cidxs,cnts) %>%
+    rename(gidx = i) %>% mutate(gidx=glue("g{gidx}"))
 #}}}
-gtss2 = gtss %>% inner_join(tic, by=c('i')) %>%
-    select(i,tpm,gid,n_tss,npos,everything())
+gtss2 = gtss %>% inner_join(tic, by=c('gidx')) %>%
+    select(gidx,tpm,gid,n_tss,npos,everything())
 
 r3 = list(tss = tss2, gtss=gtss2, SE_ctss_m=SE_ctss_m, ctss_m=ctss_m)
 fo = glue('{dirw}/03.rep.merged.rds')
@@ -698,6 +688,46 @@ saveRDS(r3, fo)
 # run cg.job.03.R
 
 
+#{{{ export to IGV
+to = tss %>%
+    mutate(start=start-1, tstart=domi-1, tend=domi, width=end-start,
+           score=support,
+           id = sprintf("t%05d", i),
+           rgb = ifelse(is.na(gid), '0,128,128', '0,0,0'),
+           blockCnt=1, blockSizes=sprintf("%d,",width), blockStarts="0,") %>%
+    mutate(note1 = sprintf("width=%d", width)) %>%
+    mutate(note2 = sprintf("IQR=%d", IQR)) %>%
+    mutate(note3 = sprintf("peakType=%s", peakType)) %>%
+    select(chrom, start, end, id, score, srd, tstart, tend, rgb,
+           blockCnt, blockSizes, blockStarts,
+           note1, note2, note3, gid) %>%
+    arrange(chrom, start, end)
+fo = glue('{dirw}/91.ftss.bed')
+write_tsv(to,fo, col_names=F)
+system("bgzip -c 91.ftss.bed > 91.ftss.bed.gz")
+system("tabix -p bed 91.ftss.bed.gz")
+
+t_enh = rowRanges(enh) %>% as_tibble()
+to = t_enh %>%
+    mutate(start=start-1, tstart=thick.start-1, tend=thick.end,
+           score=ifelse(score>1000, 1000, round(score)),
+           id=sprintf("enh%04d", 1:n()),
+           rgb = 0,
+           blockCnt=1, blockSizes=sprintf("%d,",width), blockStarts="0,") %>%
+    mutate(strand=ifelse(strand=='*', '.', strand)) %>%
+    mutate(note1 = sprintf("width=%d", width)) %>%
+    mutate(note3 = sprintf("peakType=%s", peakTxType)) %>%
+    select(chrom=seqnames, start, end, id, score, strand, tstart, tend, rgb,
+           blockCnt, blockSizes, blockStarts,
+           note1, note3) %>%
+    arrange(chrom, start, end)
+fo = file.path(dirw, '92.enh.bed')
+write_tsv(to,fo, col_names=F)
+# bgzip -c 92.enh.bed > 92.enh.bed.gz
+# tabix -p bed 92.enh.bed.gz
+#}}}
+
+##### OBSOLETE #####
 #{{{ [old] tss meta plots (sample-wise)
 x0 = rowRanges(SE_tss) %>% as_tibble() %>%
     mutate(tstart=thick.start-1, tend=thick.start, start=start-1) %>%
@@ -741,77 +771,6 @@ fo = file.path(dirw, '13.metaplot.pdf')
 ggsave(p, file=fo, width=12, height=10)
 #}}}
 #}}}
-
-#{{{ sample clustering t-SNE
-fi = glue("{dirw}/01.tss.rds")
-r1 = readRDS(fi)
-SE_ctss=r1$SE_ctss; SE_tss=r1$SE_tss; tss=r1$tss
-#
-fi = glue("{dirw}/02.gtss.rds")
-r2 = readRDS(fi)
-SE_gtss=r2$SE_gtss; gtss=r2$gtss
-#
-th = thf %>% mutate(grp = glue("{Genotype} {Tissue}")) %>%
-    group_by(grp) %>% mutate(idx = 1:n()) %>% ungroup() %>%
-    mutate(clab=ifelse(idx==1, grp, ''))
-
-res = rnaseq_cpm_raw(yid)
-#tm = assay(SE_tss, 'TPM') %>% as_tibble() %>% mutate(gid = glue("g{1:n()}")) %>%
-    #gather(SampleID, value, -gid) %>%
-    #mutate(value=asinh(value))
-tm = res$tm %>% filter(SampleID %in% th$SampleID) %>%
-    mutate(value=asinh(CPM))
-
-p = plot_tsne(tm,th,pct.exp=.6,perp=3,iter=1500, seed=2,
-    var.shape='Genotype', var.col='Tissue', var.ellipse='grp', var.lab='clab',
-    shapes=c(15,16,4), legend.pos='top.right', legend.dir='v', pal.col='aaas') +
-    theme(legend.box='horizontal', legend.margin=margin(.5,.5,0,0,'lines')) +
-    guides(shape=guide_legend(order=1))
-fp = glue('{dirw}/10.tsne.pdf')
-ggsave(p, file=fp, width=5, height=5)
-fp = glue('{dirf}/sf03b.pdf')
-ggsave(p, file=fp, width=5, height=5)
-#}}}
-
-#{{{ export to IGV
-to = tss %>%
-    mutate(start=start-1, tstart=domi-1, tend=domi, width=end-start,
-           score=support,
-           id = sprintf("t%05d", i),
-           rgb = ifelse(is.na(gid), '0,128,128', '0,0,0'),
-           blockCnt=1, blockSizes=sprintf("%d,",width), blockStarts="0,") %>%
-    mutate(note1 = sprintf("width=%d", width)) %>%
-    mutate(note2 = sprintf("IQR=%d", IQR)) %>%
-    mutate(note3 = sprintf("peakType=%s", peakType)) %>%
-    select(chrom, start, end, id, score, srd, tstart, tend, rgb,
-           blockCnt, blockSizes, blockStarts,
-           note1, note2, note3, gid) %>%
-    arrange(chrom, start, end)
-fo = glue('{dirw}/91.ftss.bed')
-write_tsv(to,fo, col_names=F)
-system("bgzip -c 91.ftss.bed > 91.ftss.bed.gz")
-system("tabix -p bed 91.ftss.bed.gz")
-
-t_enh = rowRanges(enh) %>% as_tibble()
-to = t_enh %>%
-    mutate(start=start-1, tstart=thick.start-1, tend=thick.end,
-           score=ifelse(score>1000, 1000, round(score)),
-           id=sprintf("enh%04d", 1:n()),
-           rgb = 0,
-           blockCnt=1, blockSizes=sprintf("%d,",width), blockStarts="0,") %>%
-    mutate(strand=ifelse(strand=='*', '.', strand)) %>%
-    mutate(note1 = sprintf("width=%d", width)) %>%
-    mutate(note3 = sprintf("peakType=%s", peakTxType)) %>%
-    select(chrom=seqnames, start, end, id, score, strand, tstart, tend, rgb,
-           blockCnt, blockSizes, blockStarts,
-           note1, note3) %>%
-    arrange(chrom, start, end)
-fo = file.path(dirw, '92.enh.bed')
-write_tsv(to,fo, col_names=F)
-# bgzip -c 92.enh.bed > 92.enh.bed.gz
-# tabix -p bed 92.enh.bed.gz
-#}}}
-
 
 #{{{ DE TSS calling
 require(DESeq2)
@@ -935,7 +894,6 @@ x %>% filter(padj < .05, abs(log2fc) >= 1) %>%
     filter(gt==gtR) %>% count(gid) %>% count(n)
 #}}}
 
-
 #{{{ # enhancer candidates
 bc = clusterBidirectionally(fctss, balanceThreshold=0.95) %>%
     calcBidirectionality(samples=fctss)
@@ -947,5 +905,44 @@ enh = quantifyClusters(fctss, clusters=fbc, inputAssay='counts') %>%
     assignTxType(txModels=txdb, outputColumn='txType') %>%
     assignTxType(txModels=txdb, outputColumn='peakTxType', swap='thick')
 fenh = enh %>% subset(peakTxType %in% c("intron","intergenic"))
+#}}}
+
+#{{{ [old] check TSS ovlp w. TEs
+fo = glue("{dirw}/t1.bed")
+to = tss %>% select(chrom,start,end,i) %>% mutate(start=start-1)
+write_tsv(to, fo, col_names=F)
+
+system(glue('intersectBed -u -f 0.5 -a t1.bed -b ~/projects/genome/data2/TE/11.B73.bed > t2.bed'))
+ti2 = read_tsv('t2.bed', col_names=c('chrom','start','end','i')) %>%
+    select(i) %>% mutate(te = 'TE')
+
+ttypes = gcfg$gene %>% distinct(ttype) %>% arrange(ttype) %>% pull(ttype)
+ttypes = c(ttypes[c(3,1,2,4:12)], 'intergenic','antisense')
+ptypes = c(levels(tss$peakType), 'TE', 'non-TE')
+tss2 = tss %>% left_join(gcfg$gene %>% select(gid,ttype), by='gid') %>%
+    left_join(ti2, by=c('i')) %>%
+    replace_na(list(te='non-TE')) %>%
+    mutate(ttype = ifelse(peakType %in% c('intergenic','antisense'), as.character(peakType), ttype)) %>%
+    mutate(ptype = ifelse(peakType %in% c('intergenic','antisense'), te, as.character(peakType))) %>%
+    mutate(ttype = factor(ttype, levels=ttypes)) %>%
+    mutate(ptype = factor(ptype, levels=ptypes))
+tss2 %>% count(ttype, ptype) %>% spread(ttype, n) %>% print(n=20, width=Inf)
+
+tp = tss2 %>%
+    rename(tag1=ttype,tag2=ptype) %>% count(tag1, tag2)
+p = cmp_proportion1(tp, xangle=15, oneline=F, legend.title='', expand.x=c(.05,.05),
+    margin.l=2, fills=pal_simpsons()(11)) +
+    o_margin(1.5,.3,.01,1.5)
+#
+fo = glue("{dirw}/08.te.prop.pdf")
+ggsave(p, file=fo, width=5, height=5)
+p = cmp_cnt1(tp, xangle=15, oneline=F, legend.title='', expand.x=c(.05,.05),
+    margin.l=2, fills=pal_simpsons()(11)) +
+    o_margin(1.5,.3,.01,1.5)
+#
+fo = glue("{dirw}/08.te.cnt.pdf")
+ggsave(p, file=fo, width=5, height=5)
+#fo = glue("{dirf}/sf02b.rds")
+#saveRDS(p, fo)
 #}}}
 

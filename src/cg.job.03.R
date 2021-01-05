@@ -45,14 +45,14 @@ ks_dist <- function(xs) {
     #}}}
 }
 #}}}
-ti = tss # with columns 'i', 'npos', 'cnts'
-ti = gtss # with columns 'i', 'npos', 'cnts'
+ti = gtss %>% rename(i=gidx) # with columns 'i', 'npos', 'cnts'
+ti = tss %>% rename(i=tidx) # with columns 'i', 'npos', 'cnts'
 
-conds4 = c("Br","Bs",'Ar','As')
 ti1a = ti %>% select(i, npos, tpm.cond) %>% unnest(tpm.cond)
 ti1b = ti %>% select(i, cnts) %>% unnest(cnts)
 ti2 = ti1a %>% inner_join(ti1b, by=c('i','cond'))
 #{{{ multi-sample test
+conds4 = c("Br","Bs",'Ar','As')
 r2 = ti2 %>% filter(npos > 1) %>%
     filter(tpm >= 1, cond %in% conds4) %>%
     group_by(i) %>%
@@ -64,8 +64,6 @@ r2 = ti2 %>% filter(npos > 1) %>%
 #}}}
 #
 #{{{ 2-sample comparison
-ct = tibble(cond1 = c("Br", 'Bs', 'As', 'Bs', 'Hr','Hr','Hr','Hs','Hs','Hs'),
-            cond2 = c("Ar", 'As', 'Ar', 'Br', 'Br','Ar','Cr','Bs','As','Cs'))
 r3 = ti2 %>% filter(npos > 1) %>%
     select(i, cond, tpm, cnts)
 imix <- function(tpmA, tpmB, cntsA, cntsB)
@@ -78,7 +76,7 @@ r3a = r3 %>% pivot_wider(names_from=cond, values_from=c(tpm,cnts)) %>%
     select(i, ends_with('Cr'), ends_with('Cs')) %>%
     pivot_longer(cols=!i, names_to=c(".value","cond"), names_pattern="(.*)_(.*)")
 r3 = r3 %>% bind_rows(r3a)
-r3b = ct %>%
+r3b = cmps %>%
     inner_join(r3, by=c('cond1'='cond')) %>% rename(tpm1=tpm, cnts1=cnts) %>%
     inner_join(r3, by=c('i','cond2'='cond')) %>% rename(tpm2=tpm, cnts2=cnts) %>%
     filter(tpm1 >= 1, tpm2 >= 1) %>%
@@ -94,17 +92,17 @@ r.pair = r3b %>% select(i,cond1,cond2) %>%
 #    mutate(pval.qn.raw = unlist(y3)) %>%
     group_by(i) %>% nest() %>% rename(cmp = data)
 #}}}
-ti2s = ti2 %>% group_by(i) %>%
-    summarise(ncond4 = sum(tpm>=1 & cond %in% conds4)) %>% ungroup()
-r = ti %>% inner_join(ti2s, by='i') %>%
+#ti2s = ti2 %>% group_by(i) %>%
+    #summarise(ncond4 = sum(tpm>=1 & cond %in% conds4)) %>% ungroup()
+r = ti %>%# inner_join(ti2s, by='i') %>%
     #left_join(r.multi, by='i') %>%
     left_join(r.pair, by='i')
 
-tss2 = r %>% select(i,tpm,IQR,support,peakType,gid,npos,ncond4,tpm.cond,cmp)
-gtss2 = r %>% select(i,tpm,gid,n_tss,npos,ncond4,cmp)
+tss2 = r %>% select(i,tpm,IQR,support,peakType,gid,npos,tpm.cond,cmp)
+gtss2 = r %>% select(i,tpm,gid,n_tss,npos,cmp)
 
 r5 = list(tss = tss2, gtss = gtss2)
-fo = file.path(dirw, '05.shift.rds')
+fo = glue("{dirw}/05.shift.rds")
 saveRDS(r5, fo)
 
 #{{{ ### benchmark multidplyr and bpparallel

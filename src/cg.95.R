@@ -16,6 +16,15 @@ ggarrange(a, c,
 ggexport(filename="f1.pdf", width=6, height=8)
 #}}}
 
+#{{{ f2
+a = readRDS('f2a.rds')
+b = readRDS('f2b.rds')
+c = readRDS('f2c.rds')
+ggarrange(a, b, c,
+    nrow=1, ncol=3, widths=c(1,1,1.2), labels = LETTERS[1:3]) %>%
+ggexport(filename="f2.pdf", width=9, height=3)
+#}}}
+
 #{{{ sf01
 a = readRDS('sf02a.rds') + facet_wrap(~pnl,nrow=4,scale='free')
 b = readRDS('sf02b.rds') + facet_wrap(~pnl,nrow=4) +

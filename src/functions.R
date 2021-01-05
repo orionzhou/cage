@@ -42,6 +42,33 @@ thf = thf %>% inner_join(thfs, by=c('Genotype','Tissue')) %>%
     select(SampleID,Genotype,Tissue,Treatment,Replicate,lab,cond.s,cond.l)
 shapes = c('single (1 bp)', 'steep  (2-10 bp)', 'broad  (>= 10 bp)')
 shapess = c('single', 'steep', 'broad')
+#{{{ comparisons
+cmps = tibble(cmp = c(
+"Br Bs",
+"Bstem Bs",
+"Bhusk Bs",
+"Ar Bs",
+"As Bs",
+"Ar Br",
+"Ar As",
+"Hr Br",
+"Hr Ar",
+"Hr Cr",
+"Hs Bs",
+"Hs As",
+"Hs Cs")) %>%
+    separate(cmp, c("cond1",'cond2'), sep=' ', remove=F) %>%
+    mutate(cmp = as_factor(cmp)) %>%
+    inner_join(thfs %>% select(cond1=cond.s,cond1.l=cond.l), by='cond1') %>%
+    inner_join(thfs %>% select(cond2=cond.s,cond2.l=cond.l), by='cond2') %>%
+    mutate(cmp.l=glue("{cond1.l} vs {cond2.l}")) %>%
+    mutate(cmp.l = as_factor(cmp.l))
+#}}}
+cmps5 = cmps$cmp[1:5]
+cmps4 = cmps$cmp[c(1,7,5,6)]
+cols_shape = pal_npg()(5)
+cols_shift = brewer.pal(5, 'Accent')
+cols_var = pal_d3()(5)
 #}}}
 #
 read_cage_bws <- function(diri, dsg, minSupport=2) { # dsg is a df with 'Name'
