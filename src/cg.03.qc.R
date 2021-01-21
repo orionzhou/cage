@@ -407,6 +407,7 @@ ggsave(pv, filename=fo, width=3, height=4)
 #{{{ merge 4 species
 fi = glue("{dirw}/02.tss.gtss.cond.rds")
 tss1 = readRDS(fi)$tss.b %>% select(-tpm.cond) %>%
+    #filter(peakType != 'intergenic') %>%
     rename(i=tidx,strand=srd,pTPM=tpm) %>% mutate(org='Maize')
 fi = glue("{dird}/90_refs/Kurihara2018/10.tss.rds")
 tss2 = readRDS(fi)$tss %>% mutate(org='Arabidopsis')
@@ -605,6 +606,8 @@ save_kable(x,file=fo)
 #}}}
 
 #{{{ ms stats
+ti %>% filter(gt=='B73',tis=='shoot',s=='E') %>% distinct(i,tag) %>% count(tag)
+ti %>% filter(gt=='B73',s=='E') %>% distinct(i,tag) %>% count(tag)
 ti %>% filter(gt == 'B73', s=='E') %>% distinct(i,tag) %>% count(tag)
 tib = ti %>% filter(gt == 'B73', s=='E', tag=='gene')
 tib %>% count(cond) %>% pull(n) %>% mean()
@@ -613,6 +616,15 @@ tib %>% distinct(i)
 tib = ti %>% filter(gt == 'B73', s=='E')
 tia = ti %>% filter(gt == 'A632', s=='E') %>% distinct(i, tag) %>%
     filter(! i %in% tib$i) %>% count(tag) %>% print(n=4)
+
+# alt-TSSs in non-shoot B73 tissues
+tig = ti %>% filter(gt=='B73',tis=='shoot',s=='E',tag=='gene')
+tit = ti %>% filter(gt=='B73',tag=='tss') %>%
+    select(i,tis,s) %>% spread(tis, s)
+tit %>%
+    filter(shoot=='x', root=='E'|stem=='E'|husk=='E') %>%
+    inner_join(g2t, by=c('i'='tidx')) %>%
+    count(gidx %in% tig$i)
 #}}}
 #}}}
 
@@ -687,12 +699,16 @@ saveRDS(r3, fo)
 #}}}
 # run cg.job.03.R
 
-
 #{{{ export to IGV
+diro = glue("{dird}/09_igv")
+#{{{ all
+fi = glue("{dirw}/01.tss.gtss.rds")
+r1 = readRDS(fi)
+tss=r1$tss
+
 to = tss %>%
     mutate(start=start-1, tstart=domi-1, tend=domi, width=end-start,
-           score=support,
-           id = sprintf("t%05d", i),
+           score=support, id = tidx,
            rgb = ifelse(is.na(gid), '0,128,128', '0,0,0'),
            blockCnt=1, blockSizes=sprintf("%d,",width), blockStarts="0,") %>%
     mutate(note1 = sprintf("width=%d", width)) %>%
@@ -702,29 +718,108 @@ to = tss %>%
            blockCnt, blockSizes, blockStarts,
            note1, note2, note3, gid) %>%
     arrange(chrom, start, end)
-fo = glue('{dirw}/91.ftss.bed')
-write_tsv(to,fo, col_names=F)
-system("bgzip -c 91.ftss.bed > 91.ftss.bed.gz")
-system("tabix -p bed 91.ftss.bed.gz")
 
-t_enh = rowRanges(enh) %>% as_tibble()
-to = t_enh %>%
-    mutate(start=start-1, tstart=thick.start-1, tend=thick.end,
-           score=ifelse(score>1000, 1000, round(score)),
-           id=sprintf("enh%04d", 1:n()),
-           rgb = 0,
-           blockCnt=1, blockSizes=sprintf("%d,",width), blockStarts="0,") %>%
-    mutate(strand=ifelse(strand=='*', '.', strand)) %>%
-    mutate(note1 = sprintf("width=%d", width)) %>%
-    mutate(note3 = sprintf("peakType=%s", peakTxType)) %>%
-    select(chrom=seqnames, start, end, id, score, strand, tstart, tend, rgb,
-           blockCnt, blockSizes, blockStarts,
-           note1, note3) %>%
-    arrange(chrom, start, end)
-fo = file.path(dirw, '92.enh.bed')
+fo = glue('{dirw}/91.tss.bed')
 write_tsv(to,fo, col_names=F)
-# bgzip -c 92.enh.bed > 92.enh.bed.gz
-# tabix -p bed 92.enh.bed.gz
+system("bgzip -c 91.tss.bed > 91.tss.bed.gz")
+system("tabix -p bed 91.tss.bed.gz")
+#}}}
+
+#{{{ B73
+fi = glue("{dirw}/02.tss.gtss.cond.rds")
+r2 = readRDS(fi)
+tss=r2$tss.b; gtss=r2$gtss.b
+
+# B73 TSSs
+to = tss %>%
+    mutate(start=start-1, tstart=domi-1, tend=domi, width=end-start,
+           score=support, id = tidx,
+           rgb = ifelse(is.na(gid), '0,128,128', '0,0,0'),
+           blockCnt=1, blockSizes=sprintf("%d,",width), blockStarts="0,") %>%
+    mutate(note1 = sprintf("width=%d", width)) %>%
+    mutate(note2 = sprintf("IQR=%d", IQR)) %>%
+    mutate(note3 = sprintf("peakType=%s", peakType)) %>%
+    select(chrom, start, end, id, score, srd, tstart, tend, rgb,
+           blockCnt, blockSizes, blockStarts,
+           note1, note2, note3, gid) %>%
+    arrange(chrom, start, end)
+
+fo = glue('{dirw}/92.tss.B73.bed')
+write_tsv(to, fo, col_names=F)
+#}}}
+
+#{{{ intergenic single
+fi = glue("{dirw}/01.tss.gtss.rds")
+r1 = readRDS(fi)
+tss=r1$tss
+iqr2shape <- function(iqr, opt='l') {
+    #{{{
+    if (opt == 's') {
+        vals = shapess
+    } else {
+        vals = shapes
+    }
+    ifelse(iqr==0, vals[1], ifelse(iqr <= 10, vals[2], vals[3]))
+    #}}}
+}
+tss = tss %>% rename(iqr=IQR) %>%
+    mutate(shape = map_chr(iqr, iqr2shape)) %>%
+    mutate(shape.s = map_chr(iqr, iqr2shape, opt='s')) %>%
+    mutate(shape = factor(shape, levels=shapes)) %>%
+    mutate(shape.s = factor(shape.s, levels=shapess))
+
+to = tss %>% filter(peakType=='intergenic', shape.s=='single') %>%
+    mutate(start=domi-5, end=domi+5) %>%
+    select(chrom,start,end,tidx) %>% arrange(chrom,start)
+fo = glue("{diro}/04.te.single.bed")
+write_tsv(to, fo, col_names=F)
+
+fh = "~/projects/s3/zhoup-igv-data/Zmays-B73/chromatin/meta.xlsx"
+th = read_xlsx(fh)
+fi = glue("{diro}/x.tab")
+ti = read_tsv(fi, skip=3,col_names=F)
+
+nsam = 30
+ti2 = ti %>% mutate(i=1:n()) %>%
+    gather(cidx, cnt, -i) %>% mutate(cidx=as.integer(str_sub(cidx,2)))
+ti2s = tibble(sam = sprintf('s%02d', 1:nsam)) %>% crossing(j=1:101) %>%
+    arrange(sam, j) %>% mutate(cidx=1:n())
+ti3 = ti2 %>% inner_join(ti2s, by='cidx') %>%
+    replace_na(list(cnt=0)) %>%
+    group_by(sam, j) %>%
+    summarise(cnt = sum(cnt)) %>% ungroup()
+
+#{{{ meta plot for picked samples
+tp = th %>% mutate(pnl.x=histone, pnl.y=glue("{tissue}_{rep}")) %>%
+    mutate(pnl = glue("{histone}_{tissue}_{rep}")) %>%
+    inner_join(ti3, by=c('sid'='sam'))
+tps = tibble(idx=c(1,51,101), lab=c('-500','TSS','+500'))
+p = ggplot(tp) +
+    geom_line(aes(j, cnt)) +
+    #geom_vline(xintercept=tps$idx, linetype='dashed', size=.5) +
+    scale_x_continuous(breaks=tps$idx, labels=tps$lab, expand=expansion(mult=c(.05,.05))) +
+    scale_y_continuous(expand=expansion(mult=c(.05,.05))) +
+    facet_wrap(pnl~., ncol=5, scale='free') +
+    otheme(legend.pos='top.right', legend.dir='v', legend.title=T, strip.style='light',
+           xgrid=T,xtick=T, ytick=T, xtitle=F, xtext=T, ytext=T)
+fo = glue("{diro}/x.pdf")
+ggsave(p, file=fo, width=12, height=8)
+#}}}
+#}}}
+
+#{{{ check ovlp w. AGPv4 annotated TSSs
+fi = '~/projects/genome/data/Zmays_B73/50_annotation/10.tsv'
+ti = read_tsv(fi)
+
+ti2 = ti %>% group_by(tid) %>%
+    summarise(chrom=chrom[1], s=min(start), e= max(end), srd=srd[1]) %>% ungroup() %>%
+    mutate(tss = ifelse(srd=='-', e, s))
+
+to2 = ti2 %>% mutate(s = tss-1, e = tss) %>% distinct(chrom,s,e) %>%
+    arrange(chrom,s,e)
+fo = glue("{dirw}/b73.tss.bed")
+write_tsv(to2, fo, col_names=F)
+#}}}
 #}}}
 
 ##### OBSOLETE #####

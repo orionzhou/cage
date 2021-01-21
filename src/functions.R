@@ -14,7 +14,8 @@ gcfg = read_genome_conf()
 #
 fh = glue('{dird}/01.meta.tsv')
 th0 = read_tsv(fh)
-tgl = gcfg$gene %>% mutate(loc = glue("{chrom}:{start}-{end}")) %>% select(gid,loc)
+tgl = gcfg$gene %>% mutate(loc = glue("{chrom}:{start}-{end}")) %>%
+    select(gid,ttype,loc)
 
 #{{{ process th
 tissues = c('shoot','root','stem','husk')
@@ -59,8 +60,8 @@ cmps = tibble(cmp = c(
 "Hs Cs")) %>%
     separate(cmp, c("cond1",'cond2'), sep=' ', remove=F) %>%
     mutate(cmp = as_factor(cmp)) %>%
-    inner_join(thfs %>% select(cond1=cond.s,cond1.l=cond.l), by='cond1') %>%
-    inner_join(thfs %>% select(cond2=cond.s,cond2.l=cond.l), by='cond2') %>%
+    left_join(thfs %>% select(cond1=cond.s,cond1.l=cond.l), by='cond1') %>%
+    left_join(thfs %>% select(cond2=cond.s,cond2.l=cond.l), by='cond2') %>%
     mutate(cmp.l=glue("{cond1.l} vs {cond2.l}")) %>%
     mutate(cmp.l = as_factor(cmp.l))
 #}}}

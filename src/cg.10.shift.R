@@ -127,12 +127,45 @@ tpv = tp0 %>% filter(cmp %in% c("Br_Ar",'Bs_As'), shift>=.5) %>%
 tp0 %>% filter(shift<.05, padj>=.5) %>% count(gid) %>% count(n)
 #}}}
 
+#{{{ call stable & variable genes
+tg1 = tg %>% filter(cmp %in% cmps5) %>%
+    filter(tag == 'conserved') %>%
+    count(i, gid) %>% filter(n==5) %>%
+    select(gid) %>% mutate(tag='stable')
+cmps = c('Ar Br', 'As Bs')
+tg2 = tg %>% filter(cmp %in% cmps) %>%
+    filter(tag=='highly variable') %>%
+    count(gid) %>% filter(n==length(cmps)) %>%
+    select(gid) %>% mutate(tag='variable')
+tg0 = tgl %>% select(gid) %>% mutate(tag = 'all')
+tgc = rbind(tg1,tg2,tg0) %>%
+    mutate(tag = as_factor(tag))
+tgcs = tgc %>% count(tag) %>% mutate(pnl = glue("{tag} ({n})")) %>%
+    mutate(pnl = as_factor(pnl))
+tgc = tgc %>% inner_join(tgcs, by='tag')
+tgc %>% count(pnl)
+
+ss = tg %>% select(gid,cmp,shift) %>%
+    mutate(cmp = str_replace(cmp, 'C','M')) %>%
+    mutate(cmp = str_replace(cmp, ' ','_')) %>%
+    mutate(cmp = glue("SS_{cmp}")) %>%
+    spread(cmp, shift)
+
+to = tgc %>% filter(tag != 'all') %>%
+    select(pnl, gid) %>%
+    inner_join(ss, by='gid')
+to %>% count(pnl)
+fo = glue("{dird}/91_share/15.stable.variable.tsv")
+write_tsv(to, fo)
+#}}}
+
 #{{{ characterize  stable TSSs
 stb = tg %>% filter(cmp %in% cmps5) %>%
     filter(tag == 'conserved') %>%
     count(i, gid) %>% filter(n==5) %>%
     mutate(tag = 'stable') %>%
     inner_join(tgl, by='gid') %>% print(n=30)
+stb %>% count(ttype)
 
 #{{{ GO
 tgo = read_go(src='Interproscan5')
@@ -217,6 +250,12 @@ p1 = cmp_proportion1(tp,ytext=T, oneline=T, ypos='right',legend.pos='none',
     o_margin(.1,.1,.1,.1)
 fo = file.path(dirw, "31.syn.pdf")
 ggsave(p1, file=fo, width=4, height=4)
+
+x = read_syn(gcfg, opt=2) %>%
+    left_join(stb %>% select(maize1=gid,tag1=tag), by='maize1') %>%
+    left_join(stb %>% select(maize2=gid,tag2=tag), by='maize2') %>%
+    replace_na(list(tag1='non-stable', tag2='non-stable'))
+x %>% count(ftype, tag1,tag2)
 #}}}
 
 #{{{ utr5 length
@@ -326,16 +365,150 @@ ggsave(pv, filename=fo, width=3, height=4)
 #}}}
 
 
+#{{{ characterize conserved/variable gene patterns in F1
+cmps = c('Ar Br', 'As Bs')
+tg1 = tg %>% filter(cmp %in% cmps) %>%
+    filter(tag=='conserved') %>%
+    count(gid) %>% filter(n==length(cmps)) %>%
+    select(gid) %>% mutate(tag='conserved in root + shoot')
+cmps = c('Ar As', 'Br Bs')
+tg2 = tg %>% filter(cmp %in% cmps) %>%
+    filter(tag=='conserved') %>%
+    count(gid) %>% filter(n==length(cmps)) %>%
+    select(gid) %>% mutate(tag='conserved in B73 + A632')
+cmps = c('Ar Br', 'As Bs', 'Ar As', 'Br Bs')
+tg3 = tg %>% filter(cmp %in% cmps) %>%
+    filter(tag=='conserved') %>%
+    count(gid) %>% filter(n==length(cmps)) %>%
+    select(gid) %>% mutate(tag='conserved in 4 cmps')
+tg4 = stb %>% select(gid) %>% mutate(tag='conserved in 5 cmps')
+tgx = rbind(tg1,tg2,tg3,tg4) %>% mutate(tag = as_factor(tag))
+tgxs = tgx %>% count(tag) %>%
+    mutate(pnl = glue("{tag} ({n})")) %>%
+    mutate(pnl = as_factor(pnl))
+tgx = tgx %>% inner_join(tgxs, by='tag')
 
-#{{{ varaible TSS btw. B, A in F1
+tp0 = tg %>% filter(cmp %in% c("Hs As", "Hs Bs", 'Hs Cs')) %>%
+    select(gid, cmp, shift) %>%
+    spread(cmp, shift) %>%
+    rename(x=2, y=3, d=4) %>%
+    filter(!is.na(x), !is.na(y)) %>%
+    inner_join(tgx, by='gid')
+
+#{{{
+tp = tp0
+tpl = tp %>% group_by(pnl) %>% nest() %>% ungroup() %>%
+    mutate(fit = map(data, ~ lm(y~x, data=.x))) %>%
+    mutate(tidied = map(fit, glance))%>%
+    unnest(tidied) %>%
+    mutate(lab = glue("adjusted R<sup>2</sup> = {number(adj.r.squared,accuracy=.01)}"))
+xlab = 'shifting score: F1 shoot vs. A632 shoot'
+ylab = 'shifting score: F1 shoot vs. B73 shoot'
+#
+p = ggplot(tp, aes(x=x,y=y)) +
+    #geom_point(aes(x=x, y=y), alpha=.8, size=1) +
+    #geom_text(data=tps, aes(x=bin.shift, y=n+100, label=n), vjust=0, size=2.5) +
+    #geom_vline(xintercept=, linetype='dashed', size=.5) +
+    geom_hex(bins=80) +
+    geom_richtext(data=tpl, aes(x=.5,y=1,label=lab,hjust=.5,vjust=1), size=2.5) +
+    scale_x_continuous(name=xlab,breaks=c(.1,.5),expand=expansion(mult=c(.02,.02)), limits=c(0,1)) +
+    scale_y_continuous(name=ylab,breaks=c(.1,.5),expand=expansion(mult=c(.02,.02)), limits=c(0,1)) +
+    scale_fill_viridis(name='density', direction=-1) +
+    #scale_fill_manual(name='', values=pal_npg()(3)[c(3,2,1)]) +
+    facet_wrap(pnl~., nrow=1) +
+    otheme(legend.pos='bottom.right', legend.title=T, legend.dir='v',
+           legend.box='h', legend.vjust=-.5, panel.spacing=.3,
+           xtext=T, xtick=T, xtitle=T, ytitle=T, ytext=T, ytick=T,
+           xgrid=T, ygrid=T) + o_margin(.3,.3,.3,.3)
+#}}}
+fo = glue("{dirw}/41.shift.pdf")
+ggsave(p, file=fo, width=10, height=3)
+
+tp1 = tp0 %>% filter(tag=='conserved in B73 + A632')
+tgf = tg %>% filter(gid %in% tp1$gid, cond1=='As', cond2=='Bs') %>%
+    select(gid, tag)
+tp = tp1 %>% select(gid,x,y,d) %>%
+    inner_join(tgf, by='gid')
+tps = tp %>% count(tag) %>% arrange(tag) %>%
+    mutate(pnl = glue("{tag} ({n})")) %>%
+    mutate(pnl = as_factor(pnl))
+tp = tp %>% inner_join(tps, by='tag')
+#{{{
+tpl = tp %>% group_by(pnl) %>% nest() %>% ungroup() %>%
+    mutate(fit = map(data, ~ lm(y~x, data=.x))) %>%
+    mutate(tidied = map(fit, glance))%>%
+    unnest(tidied) %>%
+    mutate(lab = glue("adjusted R<sup>2</sup> = {number(adj.r.squared,accuracy=.01)}"))
+xlab = 'shifting score: F1 shoot vs. A632 shoot'
+ylab = 'shifting score: F1 shoot vs. B73 shoot'
+#
+p = ggplot(tp, aes(x=x,y=y)) +
+    geom_point(aes(x=x, y=y, color=d), size = .5) +
+    #geom_point(aes(x=x, y=y), alpha=.8, size=1) +
+    #geom_text(data=tps, aes(x=bin.shift, y=n+100, label=n), vjust=0, size=2.5) +
+    #geom_vline(xintercept=, linetype='dashed', size=.5) +
+    #geom_hex(bins=80) +
+    geom_richtext(data=tpl, aes(x=.5,y=1,label=lab,hjust=.5,vjust=1), size=2.5) +
+    scale_x_continuous(name=xlab,breaks=c(.1,.5),expand=expansion(mult=c(.02,.02)), limits=c(0,1)) +
+    scale_y_continuous(name=ylab,breaks=c(.1,.5),expand=expansion(mult=c(.02,.02)), limits=c(0,1)) +
+    scale_fill_viridis(name='density', direction=-1) +
+    #scale_fill_manual(name='', values=pal_npg()(3)[c(3,2,1)]) +
+    scale_color_viridis(name="shift_F1_merged", direction=-1) +
+    facet_wrap(pnl~., nrow=1) +
+    otheme(legend.pos='right', legend.title=T, legend.dir='v',
+           legend.box='h', legend.vjust=-.5, panel.spacing=.3,
+           xtext=T, xtick=T, xtitle=T, ytitle=T, ytext=T, ytick=T,
+           xgrid=T, ygrid=T) + o_margin(.3,.3,.3,.3)
+#}}}
+fo = glue("{dirw}/41.shift.sub.pdf")
+ggsave(p, file=fo, width=8, height=3)
+
+#{{{ save for Nathan & Erich
+fi = glue("{dirw}/02.tss.gtss.cond.rds")
+r2 = readRDS(fi)
+to0 = r2$gtss %>% select(gid,tpm.cond) %>%
+    unnest(tpm.cond) %>% select(gid, tpm, cond) %>%
+    filter(cond %in% c("Bs",'Br','As','Ar','Hs','Hr')) %>%
+    mutate(cond = glue("tpm_{cond}")) %>%
+    spread(cond,tpm)
+to1 = tp %>% select(pnl,gid,SS_Hs_As=x,SS_Hs_Bs=y,SS_Hs_Ms=d,tag)
+to2 = tg %>% filter(cmp == 'Ar As', gid %in% tp$gid) %>%
+    select(gid, SS_Ar_As=shift)
+to3 = tg %>% filter(cmp == 'Br Bs', gid %in% tp$gid) %>%
+    select(gid, SS_Br_Bs=shift)
+to4 = tg %>% filter(cmp == 'As Bs', gid %in% tp$gid) %>%
+    select(gid, SS_As_Bs=shift)
+lk = 'https://s3.msi.umn.edu/zhoup-igv/index.html?sessionURL=https://s3.msi.umn.edu/zhoup-igv-data/sessions/cage/{gid}.json'
+to = to1 %>% inner_join(to0, by='gid') %>%
+    inner_join(to2, by='gid') %>%
+    inner_join(to3, by='gid') %>%
+    inner_join(to4, by='gid') %>%
+    select(panel=pnl,gid,starts_with("tpm"), SS_Ar_As,SS_Br_Bs,SS_As_Bs,
+           SS_Hs_As,SS_Hs_Bs,SS_Hs_Ms,tag) %>%
+    arrange(panel, gid)
+links = to %>% glue_data(lk)
+to = to %>% mutate(link = links)
+
+fo = glue("{dird}/91_share/05.shift.3198.tsv")
+write_tsv(to, fo)
+#}}}
+
+x = tp %>% filter(tag == 'conserved') %>%
+    inner_join(tgl, by='gid') %>%
+    filter(x>.4,y>.4) %>%
+    print(n=20, width=Inf)
+#}}}
+
+
+#{{{ [old] varaible TSS btw. B, A in F1
 tis = 'root'
-tv1 = tg %>% filter(comp == 'Br_Ar') %>% select(gid, tag, shift)
-tv2 = tg %>% filter(comp %in% c('Hr_Br','Hr_Ar','Hr_Cr')) %>%
+tv1 = tg %>% filter(cmp == 'Ar Br') %>% select(gid, tag, shift)
+tv2 = tg %>% filter(cmp %in% c('Hr Br','Hr Ar','Hr Cr')) %>%
     mutate(shift = pmax(0, shift)) %>%
-    select(gid, comp, shift)
+    select(gid, cmp, shift)
 gids = tv2 %>% count(gid) %>% filter(n==3) %>% pull(gid)
-tv2 = tv2 %>% filter(gid %in% gids) %>% spread(comp, shift)
-tv = tv1 %>% inner_join(tv2, by='gid') %>% rename(x=Hr_Br, y=Hr_Ar, d=Hr_Cr)
+tv2 = tv2 %>% filter(gid %in% gids) %>% spread(cmp, shift)
+tv = tv1 %>% inner_join(tv2, by='gid') %>% rename(x=`Hr Br`, y=`Hr Ar`, d=`Hr Cr`)
 
 tis = 'shoot'
 tv1 = tg %>% filter(comp == 'Bs_As') %>% select(gid, tag, shift)
@@ -380,14 +553,4 @@ ggarrange(to$p[[1]], to$p[[2]], to$p[[3]], nrow=1, ncol=3,
 ggexport(filename=fo, width=10, height=4)
 #}}}
 #}}}
-
-x = tv %>% inner_join(tgl, by='gid') %>% select(gid,shift,x,y,d,loc)
-
-x %>% filter(shift < .1, x < .2, y < .2) %>%  print(n=30)
-
-x %>% filter(shift>.1,shift < .3, x >=.5, y >= .5) %>% print(n=30)
-
-x %>% filter(shift > .6, d < .1) %>% print(n=30)
-
-
 
