@@ -699,13 +699,14 @@ saveRDS(r3, fo)
 #}}}
 # run cg.job.03.R
 
-#{{{ export to IGV
-diro = glue("{dird}/09_igv")
+#{{{ export & share
 #{{{ all
 fi = glue("{dirw}/01.tss.gtss.rds")
 r1 = readRDS(fi)
-tss=r1$tss
+tss=r1$tss; gtss=r1$gtss
 
+#{{{ igv
+diro = glue("{dird}/09_igv")
 to = tss %>%
     mutate(start=start-1, tstart=domi-1, tend=domi, width=end-start,
            score=support, id = tidx,
@@ -723,6 +724,18 @@ fo = glue('{dirw}/91.tss.bed')
 write_tsv(to,fo, col_names=F)
 system("bgzip -c 91.tss.bed > 91.tss.bed.gz")
 system("tabix -p bed 91.tss.bed.gz")
+#}}}
+
+#{{{ share
+diro = glue("{dird}/91_share")
+
+to = tss %>% select(-tpm.cond)
+fo = glue('{diro}/01.tss.tsv')
+write_tsv(to, fo, na='')
+
+to = gtss %>% select(-tidx,-tpm.cond)
+fo = glue('{diro}/01.gtss.tsv')
+write_tsv(to, fo, na='')
 #}}}
 
 #{{{ B73
