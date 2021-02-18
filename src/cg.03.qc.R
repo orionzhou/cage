@@ -699,8 +699,7 @@ saveRDS(r3, fo)
 #}}}
 # run cg.job.03.R
 
-#{{{ export & share
-#{{{ all
+#{{{ export & share - all
 fi = glue("{dirw}/01.tss.gtss.rds")
 r1 = readRDS(fi)
 tss=r1$tss; gtss=r1$gtss
@@ -1052,5 +1051,31 @@ fo = glue("{dirw}/08.te.cnt.pdf")
 ggsave(p, file=fo, width=5, height=5)
 #fo = glue("{dirf}/sf02b.rds")
 #saveRDS(p, fo)
+#}}}
+
+#{{{ prop. CAGE-tag in different genomic regions for each sample
+x = assay(SE_tss, 'TPM') %>% as_tibble() %>%
+    mutate(tidx = tss$tidx, ptype=tss$peakType) %>%
+    gather(sid, tpm, -tidx, -ptype)
+x %>% group_by(sid) %>% summarise(tpm=sum(tpm)) %>% ungroup() %>% print(n=40)
+
+x1 = x %>%
+    group_by(sid,ptype) %>%
+    summarise(tpm=sum(tpm)) %>%
+    mutate(p.tpm = tpm / sum(tpm)) %>%
+    ungroup() %>% select(sid, ptype,n=tpm)
+
+tpf = thf %>% select(sid=1,cond=cond.l,note=Treatment,rep=Replicate) %>%
+    mutate(tag = glue("{cond}_{note}_{rep}")) %>%
+    select(sid, tag)
+tp = x1 %>% mutate(n = round(n/1000)) %>%
+    inner_join(tpf, by='sid') %>%
+    rename(tag1=tag, tag2=ptype)
+p = cmp_proportion1(tp, xangle=30,ytext=T, oneline=T, legend.title='',
+    expand.x=c(.03,.03), fills=pal_simpsons()(11), lab.size=2) +
+    theme(legend.position='none') +
+    o_margin(.3,.3,.3,2)
+fp = glue("{dirw}/45.sample.ptype.pdf")
+ggsave(p, file=fp, width=10, height=5)
 #}}}
 
