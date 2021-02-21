@@ -5,7 +5,7 @@ dirw = glue("{dird}/03_qc")
 setwd(dirw)
 
 #{{{ mapping rates
-yid = 'cg20a'
+yid = 'zm.cg20a'
 res = rnaseq_cpm(yid)
 th = res$th; tm = res$tm; tl = res$tl; th_m = res$th_m; tm_m = res$tm_m
 
@@ -21,9 +21,9 @@ tps = tp %>%
 
 p = ggplot(tp, aes(x=gt, y=score)) +
     geom_boxplot(aes(group=gt), size=.5, width=.7, outlier.shape=NA) +
-    geom_jitter(aes(color=gt), width=.3, size=2, alpha=.9) +
+    geom_jitter(aes(color=gt), width=.3, size=1, alpha=.9) +
     scale_x_discrete(expand=expansion(mult=c(.5,.5))) +
-    scale_y_continuous(name='Mapping Rate', expand=expansion(mult=c(.02,.02)),limits=c(0,1)) +
+    scale_y_continuous(name='Mapping Rate', expand=expansion(mult=c(.02,.02)),limits=c(.5,1)) +
     scale_color_aaas() +
     facet_grid(.~tis, scale='free') +
     #ggtitle(tp$tit[1]) +
@@ -39,7 +39,7 @@ ggsave(p, file=fo, width=4, height=4)
 #{{{ call TSS & gTSS
 txdb = load_txdb("Zmays_B73")
 dsg = thf %>% rename(Name=SampleID)
-diri = glue("{dird}/tracks/raw_bw")
+diri = glue("{dirr}/34_ctss")
 
 SE_ctss = read_cage_bws(diri, dsg, minSupport=2)
 #SE_tss = make_tss(SE_ctss, unexpressed=.5, minSamples=2)
