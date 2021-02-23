@@ -45,8 +45,8 @@ ks_dist <- function(xs) {
     #}}}
 }
 #}}}
-ti = gtss %>% rename(i=gidx) # with columns 'i', 'npos', 'cnts'
 ti = tss %>% rename(i=tidx) # with columns 'i', 'npos', 'cnts'
+ti = gtss %>% rename(i=gidx) # with columns 'i', 'npos', 'cnts'
 
 ti1a = ti %>% select(i, npos, tpm.cond) %>% unnest(tpm.cond)
 ti1b = ti %>% select(i, cnts) %>% unnest(cnts)

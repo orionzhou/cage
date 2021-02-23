@@ -45,14 +45,19 @@ SE_ctss = read_cage_bws(diri, dsg, minSupport=2)
 #SE_tss = make_tss(SE_ctss, unexpressed=.5, minSamples=2)
 SE_tss = make_tss(SE_ctss, txdb, unexpressed=1, minSamples=3)
 
+# calc adjusted total tags
+types = c("promoter","proximal",'fiveUTR')
+SE_ftss = SE_tss %>% subset(peakTxType %in% types) %>%
+    calcTotalTags() %>% calcTPM() %>% calcPooled()
+
 # characterize condition-wise TPM
 x = thf %>% rename(cond=cond.s) %>%
     group_by(cond) %>% summarise(sids = list(SampleID)) %>% ungroup() %>%
-    mutate(x = map(sids, subset_samples, ex=SE_tss)) %>%
+    mutate(x = map(sids, subset_samples, ex=SE_ftss)) %>%
     select(-sids) %>% unnest(x) %>%
     group_by(i) %>% nest() %>% rename(tpm.cond=data)
 
-tss = rowRanges(SE_tss) %>% as_tibble() %>%
+tss = rowRanges(SE_ftss) %>% as_tibble() %>%
     mutate(i = 1:n()) %>% mutate(tpm = score/ncol(assay(SE_tss))) %>%
     inner_join(x, by='i') %>%
     mutate(tidx = glue("t{i}")) %>%
@@ -60,6 +65,7 @@ tss = rowRanges(SE_tss) %>% as_tibble() %>%
            IQR, support, tid=txID, peakType=peakTxType, gid=geneID, tpm.cond)
 tss %>% count(peakType)
 tss %>% select(tpm.cond) %>% unnest(tpm.cond) %>% group_by(cond) %>% summarise(n_expressed=sum(tpm>=1))
+tss %>% select(tpm.cond) %>% unnest(tpm.cond) %>% group_by(cond) %>% summarise(tpm=sum(tpm))
 
 #{{{ create gene-level TSS clusters
 #{{{ filter TSS and create GRanges object
@@ -82,8 +88,9 @@ isDisjoint(gr)
 #}}}
 seqinfo(gr) = seqinfo(SE_ctss)
 #}}}
-SE_gtss = SE_ctss %>% quantifyClusters(clusters=gr, inputAssay='counts') %>%
-    calcTPM(totalTags='totalTags') %>%
+SE_gtss = SE_ctss %>% quantifyClusters(clusters=gr, inputAssay='counts')
+colData(SE_gtss)[,'totalTags'] = colData(SE_ftss)$totalTags
+SE_gtss = SE_gtss %>% calcTPM(totalTags='totalTags') %>%
     calcPooled() %>%# assignGeneID(geneModels=txdb, outputColumn='geneID')
     calcShape(pooled=SE_ctss, outputColumn='IQR', shapeFunction=shapeIQR,
         lower=.1, upper=.9)
@@ -103,9 +110,10 @@ gtss = rowRanges(SE_gtss) %>% as_tibble() %>%
 gtss %>% count(n_tss)
 gtss %>% count(n_tss > 1)
 gtss %>% select(tpm.cond) %>% unnest(tpm.cond) %>% group_by(cond) %>% summarise(n_expressed=sum(tpm>=1))
+gtss %>% select(tpm.cond) %>% unnest(tpm.cond) %>% group_by(cond) %>% summarise(tpm=sum(tpm))
 #}}}
 
-r1 = list(SE_ctss=SE_ctss, SE_tss=SE_tss, tss=tss,
+r1 = list(SE_ctss=SE_ctss, SE_tss=SE_tss, SE_ftss=SE_ftss, tss=tss,
           SE_gtss=SE_gtss, gtss=gtss)
 fo = glue("{dirw}/01.tss.gtss.rds")
 saveRDS(r1, fo)
@@ -185,6 +193,8 @@ gtss = gtss %>% rename(iqr=IQR) %>%
     mutate(shape.s = map_chr(iqr, iqr2shape, opt='s')) %>%
     mutate(shape = factor(shape, levels=shapes)) %>%
     mutate(shape.s = factor(shape.s, levels=shapess))
+tss %>% count(shape) %>% mutate(p=n/sum(n))
+gtss %>% count(shape) %>% mutate(p=n/sum(n))
 
 #{{{ different feature types
 tp = tss %>% rename(size=iqr) %>% count(peakType, size, shape)
@@ -200,8 +210,23 @@ p1 = tp %>% ggplot(aes(x=size, y=n, fill=shape)) +
            xgrid=T, ygrid=T) +
     guides(color=F)
 #}}}
-fo = file.path(dirw, '11.ftype.panel.pdf')
-ggsave(p1, file=fo, width=8, height=8)
+fo = glue('{dirw}/11.ftype.panel.pdf')
+ggsave(p1, file=fo, width=7, height=7)
+
+#{{{ Allison and Maike's TSS shape
+tp = tss %>% select(shape=shape.s, tpm.cond) %>%
+    unnest(tpm.cond) %>%
+    mutate(s = ifelse(support/nrep >= .2, "E", "x")) %>%
+    filter(s == 'E') %>%
+    count(cond, shape) %>%
+    select(tag1=cond,tag2=shape,n)
+
+p = cmp_proportion1(tp, ytext=T, ypos='right', legend.title='shape:') +
+    o_margin(.1,.3,.1,.3) +
+    theme(legend.position='none')
+fo = glue("{dirw}/13.shape.batch.pdf")
+ggsave(p, file=fo, width=5, height=5)
+#}}}
 
 #{{{ f1c & sf02b
 tp = tss %>% filter(peakType != 'exon') %>%
