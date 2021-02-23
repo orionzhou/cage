@@ -464,7 +464,7 @@ fo = glue("{dirw}/41.shift.sub.pdf")
 ggsave(p, file=fo, width=8, height=3)
 
 #{{{ save for Nathan & Erich
-fi = glue("{dirw}/02.tss.gtss.cond.rds")
+fi = glue("{dird}/03_qc/02.tss.gtss.cond.rds")
 r2 = readRDS(fi)
 to0 = r2$gtss %>% select(gid,tpm.cond) %>%
     unnest(tpm.cond) %>% select(gid, tpm, cond) %>%
@@ -489,7 +489,7 @@ to = to1 %>% inner_join(to0, by='gid') %>%
 links = to %>% glue_data(lk)
 to = to %>% mutate(link = links)
 
-fo = glue("{dird}/91_share/05.shift.3198.tsv")
+fo = glue("{dird}/91_share/05.shift.3584.tsv")
 write_tsv(to, fo)
 #}}}
 
