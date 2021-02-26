@@ -25,6 +25,16 @@ j[['description']] = "CAGE-seq experiments"
 j[['tracks']] = jts %>% pull(jt)
 fo = file.path(diro, 'raw_bw.json')
 write(toJSON(j, auto_unbox=T, pretty=T), fo)
+
+to = thf %>%
+    group_by(Genotype,Tissue) %>% mutate(i = 1:n()) %>% ungroup() %>%
+    arrange(Genotype, Tissue) %>%
+    mutate(name=glue("{Genotype} {Tissue} rep{i} ({SampleID})")) %>%
+    mutate(fo1 = glue("https://s3.msi.umn.edu/zhoup-igv-data/Zmays-B73/cage/raw_bw/{SampleID}.plus.bw")) %>%
+    mutate(fo2 = glue("https://s3.msi.umn.edu/zhoup-igv-data/Zmays-B73/cage/raw_bw/{SampleID}.minus.bw")) %>%
+    select(name,Genotype,Tissue,Treatment,Replicate,fo1,fo2)
+fo = glue("{dird}/91_share/00.bigwigs.tsv")
+write_tsv(to, fo)
 #}}}
 
 #{{{ merge replicates + IGV track json
