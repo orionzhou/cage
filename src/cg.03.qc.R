@@ -138,14 +138,17 @@ t_exp = ti1 %>% rbind(ti2) %>% mutate(tag = factor(tag, levels=c('tss','gene')))
 
 tb = t_exp %>% filter(gt == 'B73', s=='E') %>% distinct(i, tag)
 tb %>% count(tag)
-tss.b = tss %>% filter(tidx %in% tb$i)
-gtss.b = gtss %>% filter(gidx %in% tb$i)
+tidxs = tb %>% filter(tag == 'tss') %>% pull(i)
+gidxs = tb %>% filter(tag == 'gene') %>% pull(i)
 
-r2 = list(tss=tss,gtss=gtss,tss.b=tss.b,gtss.b=gtss.b,tb=tb)
+r2 = list(tss=tss,gtss=gtss, SE_ctss=SE_ctss, SE_tss=SE_tss, SE_gtss=SE_gtss,
+          tidxs=tidxs,gidxs=gidxs)
 fo = glue("{dirw}/02.tss.gtss.cond.rds")
 saveRDS(r2, fo)
 
 # B73 stats
+tss.b = tss %>% filter(i %in% tidxs)
+gtss.b = gtss %>% filter(i %in% gidxs)
 nrow(gtss.b)
 gtss.b %>% count(n_tss == 1)
 tss.b %>% count(peakType== 'intergenic')
@@ -169,10 +172,134 @@ cat(glue("{ti2 %>% slice(16) %>% pluck('n',1)} total B73 TSSs/gTSSs\n"))
 #}}}
 #}}}
 
-#{{{ shape characterization
+#{{{ merge replicates & make counts table for TSSs & gTSSs
 fi = glue("{dirw}/02.tss.gtss.cond.rds")
 r2 = readRDS(fi)
-tss=r2$tss.b; gtss=r2$gtss.b
+SE_ctss=r2$SE_ctss; SE_tss=r2$SE_tss; tss=r2$tss; SE_gtss=r2$SE_gtss; gtss=r2$gtss
+tcond = thf %>% rename(cond=cond.s,gt=Genotype,tis=Tissue) %>% distinct(cond,gt,tis)
+
+#{{{ make replicate-merged ctss object
+rowsum1 <- function(sids, ctss) rowSums(assay(ctss[,sids],'counts'))
+x = thf %>% rename(cond=cond.s) %>% group_by(cond) %>%
+    summarise(sids=list(SampleID)) %>% ungroup() %>%
+    mutate(cnts = map(sids, rowsum1, ctss=SE_ctss))
+ns = nrow(thfs)
+xm = matrix(x %>% select(cnts) %>% unnest(cnts) %>% pull(cnts), ncol=ns, byrow=F)
+xh = thfs %>% rename(Name=cond.s)
+colnames(xm) = xh$Name
+#
+SE_ctss_m = SummarizedExperiment(assays=SimpleList(counts=xm),
+                         rowRanges=rowRanges(SE_ctss)[,-c(1,2)],
+                         colData=xh) %>%
+    calcTotalTags(inputAssay="counts", outputColumn="totalTags")
+ctss_m = rowRanges(SE_ctss)[,-c(1,2)] %>% as.data.frame() %>% as_tibble() %>%
+    mutate(cidx=1:n()) %>% select(cidx,chrom=1,pos,strand)
+#}}}
+
+#{{{ TSS - merge replicates
+ti = findOverlaps(SE_ctss_m, rowRanges(SE_tss)) %>% as_tibble() %>%
+    select(cidx=1, i=2)
+tic = assay(SE_ctss_m, 'counts') %>% as_tibble() %>%
+    mutate(cidx = 1:n()) %>%
+    inner_join(ti, by='cidx') %>%
+    gather(cond, cnt, -i, -cidx) %>%
+    arrange(i, cond, cidx) %>%
+    group_by(i, cond) %>% summarise(cnts=list(cnt), cidxs=list(cidx)) %>%
+    ungroup() %>%
+    mutate(cond = factor(cond, levels=thfs$cond.s)) %>%
+    arrange(i, cond) %>%
+    mutate(npos = map_int(cnts, length)) %>%
+    group_by(i, npos, cidxs) %>% nest() %>% rename(cnts=data) %>% ungroup() %>%
+    select(i,npos,cidxs,cnts) %>%
+    rename(tidx = i) %>% mutate(tidx=glue("t{tidx}"))
+#}}}
+tss2 = tss %>% inner_join(tic, by=c('tidx')) %>%
+    select(tidx,tpm,IQR,support,tid,peakType,gid,npos,everything())
+
+#{{{ gTSS - merge replicates
+ti = findOverlaps(SE_ctss_m, rowRanges(SE_gtss)) %>% as_tibble() %>%
+    select(cidx=1, i=2)
+tic = assay(SE_ctss_m, 'counts') %>% as_tibble() %>%
+    mutate(cidx = 1:n()) %>%
+    inner_join(ti, by='cidx') %>%
+    gather(cond, cnt, -i, -cidx) %>%
+    arrange(i, cond, cidx) %>%
+    group_by(i, cond) %>% summarise(cnts=list(cnt), cidxs=list(cidx)) %>%
+    ungroup() %>%
+    mutate(cond = factor(cond, levels=thfs$cond.s)) %>%
+    arrange(i, cond) %>%
+    mutate(npos = map_int(cnts, length)) %>%
+    group_by(i, npos, cidxs) %>% nest() %>% rename(cnts=data) %>% ungroup() %>%
+    select(i,npos,cidxs,cnts) %>%
+    rename(gidx = i) %>% mutate(gidx=glue("g{gidx}"))
+#}}}
+gtss2 = gtss %>% inner_join(tic, by=c('gidx')) %>%
+    select(gidx,tpm,gid,n_tss,npos,everything())
+
+r3 = list(tss = tss2, gtss=gtss2, SE_ctss_m=SE_ctss_m, ctss_m=ctss_m,
+    tidxs=r2$tidxs, gidxs=r2$gidxs)
+fo = glue('{dirw}/03.rep.merged.rds')
+saveRDS(r3, fo)
+#}}}
+
+#{{{ calculate shape index (SI)
+calc_SI <- function(t_cnts) {
+    #{{{ calc shape index using tag count matrix
+    y = colSums(matrix(unlist(t_cnts %>% pull(cnts)), byrow=T, nrow=8))
+    ty = tibble(i=1:length(y), cnt=y) %>%
+        mutate(p = cnt/sum(y)) %>% mutate(ent = p*(log2(p)))
+    si = 2 + sum(ty$ent)
+    si
+    #}}}
+}
+fi = glue('{dirw}/03.rep.merged.rds')
+r3 = readRDS(fi)
+tss2 = r3$tss %>% mutate(SI = map_dbl(cnts, calc_SI))
+gtss2 = r3$gtss %>% mutate(SI = map_dbl(cnts, calc_SI))
+
+#{{{ plot SI vs IQR
+tp = x %>% rename(x=SI, y=IQR) %>%
+    mutate(x = pmax(-5, x)) %>%
+    mutate(y = pmin(300,y))
+tpl = tp %>% group_by(1) %>% nest() %>% ungroup() %>%
+    mutate(fit = map(data, ~ lm(y~x, data=.x))) %>%
+    mutate(tidied = map(fit, glance))%>%
+    unnest(tidied) %>%
+    mutate(lab = glue("adjusted R<sup>2</sup> = {number(adj.r.squared,accuracy=.01)}"))
+xlab = "Shape Index (SI)"
+ylab = "Interquantile width (IQR)"
+xbrks = c(-4,-2,-1,0,2)
+ybrks = c(0,10,50,100,200,300)
+#
+p = ggplot(tp, aes(x=x,y=y)) +
+    #geom_hline(yintercept=c(10,50), linetype='dashed', size=.5) +
+    #geom_vline(xintercept=-1, linetype='dashed', size=.5) +
+    geom_hex(bins=80) +
+    geom_richtext(data=tpl, aes(x=2,y=300,label=lab,hjust=1,vjust=1), size=2.5) +
+    scale_x_continuous(name=xlab,breaks=xbrks,expand=expansion(mult=c(.02,.02))) +
+    scale_y_continuous(name=ylab,breaks=ybrks,expand=expansion(mult=c(.02,.02))) +
+    scale_fill_viridis(name='density', direction=-1) +
+    otheme(legend.pos='bottom.left', legend.title=T, legend.dir='v',
+           legend.box='h', legend.vjust=-.5, panel.spacing=.3,
+           xtext=T, xtick=T, xtitle=T, ytitle=T, ytext=T, ytick=T,
+           xgrid=T, ygrid=T) + o_margin(.3,.3,.3,.3)
+#}}}
+fo = glue("{dirw}/14.si.iqr.pdf")
+ggsave(p, file=fo, width=5, height=5)
+
+r4 = list(tss = tss2, gtss=gtss2, SE_ctss_m=SE_ctss_m, ctss_m=ctss_m,
+    tidxs=r2$tidxs, gidxs=r2$gidxs)
+fo = glue('{dirw}/04.SI.rds')
+saveRDS(r4, fo)
+#}}}
+
+#{{{ shape characterization
+fi = glue("{dirw}/04.SI.rds")
+r4 = readRDS(fi)
+tss=r4$tss %>% filter(tidx %in% r4$tidxs)
+gtss=r4$gtss %>% filter(gidx %in% r4$gidxs)
+
+#{{{ make shape categories
 iqr2shape <- function(iqr, opt='l') {
     #{{{
     if (opt == 's') {
@@ -186,15 +313,28 @@ iqr2shape <- function(iqr, opt='l') {
 tss = tss %>% rename(iqr=IQR) %>%
     mutate(shape = map_chr(iqr, iqr2shape)) %>%
     mutate(shape.s = map_chr(iqr, iqr2shape, opt='s')) %>%
+    mutate(shape.si = ifelse(SI <= -1, "SI <= -1", "SI > -1")) %>%
+    mutate(shape.si = factor(shape.si)) %>%
     mutate(shape = factor(shape, levels=shapes)) %>%
     mutate(shape.s = factor(shape.s, levels=shapess))
 gtss = gtss %>% rename(iqr=IQR) %>%
     mutate(shape = map_chr(iqr, iqr2shape)) %>%
     mutate(shape.s = map_chr(iqr, iqr2shape, opt='s')) %>%
+    mutate(shape.si = ifelse(SI <= -1, "SI <= -1", "SI > -1")) %>%
+    mutate(shape.si = factor(shape.si)) %>%
     mutate(shape = factor(shape, levels=shapes)) %>%
     mutate(shape.s = factor(shape.s, levels=shapess))
 tss %>% count(shape) %>% mutate(p=n/sum(n))
 gtss %>% count(shape) %>% mutate(p=n/sum(n))
+
+tp = tss %>% count(shape,shape.si) %>%
+    rename(tag1 = shape.si, tag2 = shape)
+p = cmp_cnt1(tp, ytext=T, ypos='right', legend.title='Shape Index') +
+    o_margin(.1,.3,.1,.3) +
+    theme(legend.position='none')
+fo = glue("{dirw}/10.si.iqr.pdf")
+ggsave(p, file=fo, width=3, height=5)
+#}}}
 
 #{{{ different feature types
 tp = tss %>% rename(size=iqr) %>% count(peakType, size, shape)
@@ -653,76 +793,7 @@ tit %>%
 #}}}
 #}}}
 
-
-#{{{ merge replicates & make counts table for TSSs & gTSSs
-fi = glue("{dirw}/01.tss.gtss.rds")
-r1 = readRDS(fi)
-SE_ctss=r1$SE_ctss; SE_tss=r1$SE_tss; tss=r1$tss; SE_gtss=r1$SE_gtss; gtss=r1$gtss
-tcond = thf %>% rename(cond=cond.s,gt=Genotype,tis=Tissue) %>% distinct(cond,gt,tis)
-
-#{{{ make replicate-merged ctss object
-rowsum1 <- function(sids, ctss) rowSums(assay(ctss[,sids],'counts'))
-x = thf %>% rename(cond=cond.s) %>% group_by(cond) %>%
-    summarise(sids=list(SampleID)) %>% ungroup() %>%
-    mutate(cnts = map(sids, rowsum1, ctss=SE_ctss))
-ns = nrow(thfs)
-xm = matrix(x %>% select(cnts) %>% unnest(cnts) %>% pull(cnts), ncol=ns, byrow=F)
-xh = thfs %>% rename(Name=cond.s)
-colnames(xm) = xh$Name
-#
-SE_ctss_m = SummarizedExperiment(assays=SimpleList(counts=xm),
-                         rowRanges=rowRanges(SE_ctss)[,-c(1,2)],
-                         colData=xh) %>%
-    calcTotalTags(inputAssay="counts", outputColumn="totalTags")
-ctss_m = rowRanges(SE_ctss)[,-c(1,2)] %>% as.data.frame() %>% as_tibble() %>%
-    mutate(cidx=1:n()) %>% select(cidx,chrom=1,pos,strand)
-#}}}
-
-#{{{ TSS - merge replicates
-ti = findOverlaps(SE_ctss_m, rowRanges(SE_tss)) %>% as_tibble() %>%
-    select(cidx=1, i=2)
-tic = assay(SE_ctss_m, 'counts') %>% as_tibble() %>%
-    mutate(cidx = 1:n()) %>%
-    inner_join(ti, by='cidx') %>%
-    gather(cond, cnt, -i, -cidx) %>%
-    arrange(i, cond, cidx) %>%
-    group_by(i, cond) %>% summarise(cnts=list(cnt), cidxs=list(cidx)) %>%
-    ungroup() %>%
-    mutate(cond = factor(cond, levels=thfs$cond.s)) %>%
-    arrange(i, cond) %>%
-    mutate(npos = map_int(cnts, length)) %>%
-    group_by(i, npos, cidxs) %>% nest() %>% rename(cnts=data) %>% ungroup() %>%
-    select(i,npos,cidxs,cnts) %>%
-    rename(tidx = i) %>% mutate(tidx=glue("t{tidx}"))
-#}}}
-tss2 = tss %>% inner_join(tic, by=c('tidx')) %>%
-    select(tidx,tpm,IQR,support,tid,peakType,gid,npos,everything())
-
-#{{{ gTSS - merge replicates
-ti = findOverlaps(SE_ctss_m, rowRanges(SE_gtss)) %>% as_tibble() %>%
-    select(cidx=1, i=2)
-tic = assay(SE_ctss_m, 'counts') %>% as_tibble() %>%
-    mutate(cidx = 1:n()) %>%
-    inner_join(ti, by='cidx') %>%
-    gather(cond, cnt, -i, -cidx) %>%
-    arrange(i, cond, cidx) %>%
-    group_by(i, cond) %>% summarise(cnts=list(cnt), cidxs=list(cidx)) %>%
-    ungroup() %>%
-    mutate(cond = factor(cond, levels=thfs$cond.s)) %>%
-    arrange(i, cond) %>%
-    mutate(npos = map_int(cnts, length)) %>%
-    group_by(i, npos, cidxs) %>% nest() %>% rename(cnts=data) %>% ungroup() %>%
-    select(i,npos,cidxs,cnts) %>%
-    rename(gidx = i) %>% mutate(gidx=glue("g{gidx}"))
-#}}}
-gtss2 = gtss %>% inner_join(tic, by=c('gidx')) %>%
-    select(gidx,tpm,gid,n_tss,npos,everything())
-
-r3 = list(tss = tss2, gtss=gtss2, SE_ctss_m=SE_ctss_m, ctss_m=ctss_m)
-fo = glue('{dirw}/03.rep.merged.rds')
-saveRDS(r3, fo)
-#}}}
-# run cg.job.03.R
+# characterize shifting scores by running cg.job.03.R
 
 #{{{ export & share - all
 fi = glue("{dirw}/01.tss.gtss.rds")
@@ -750,7 +821,7 @@ system("bgzip -c 91.tss.bed > 91.tss.bed.gz")
 system("tabix -p bed 91.tss.bed.gz")
 #}}}
 
-#{{{ share
+#{{{ TSS & gTSS
 diro = glue("{dird}/91_share")
 
 to = tss %>% select(-tpm.cond)
@@ -1104,3 +1175,23 @@ fp = glue("{dirw}/45.sample.ptype.pdf")
 ggsave(p, file=fp, width=10, height=5)
 #}}}
 
+
+# try trackplot
+source('~/source/trackplot/trackplot.R')
+bws = c("s12.plus.bw",'s12.minus.bw','s13.plus.bw','s13.minus.bw')
+bws = glue("{dird}/tracks/raw_bw/{bws}")
+gtf = "~/projects/s3/zhoup-genome/Zmays_B73/50_annotation/15.gtf"
+
+fo = glue("{dirw}/z.pdf")
+i = 'g19'
+gid = gtss %>% filter(gidx==i) %>% pull(gid)
+gloc = gcfg$gene %>% filter(gid==!!gid) %>%
+    mutate(l = glue("{chrom}:{start-3000}-{end+3000}")) %>% pull(l)
+track_data = track_extract(bigWigs=bws, loci=gloc)
+reg = gtss %>% filter(gidx==i) %>% select(chr=chrom,start,end) %>% mutate(name='promoter')
+pdf(fo, width=8, height=6)
+track_plot(summary_list = track_data,
+    draw_gene_track = T,
+    gene_model = gtf, isGTF=T, regions = reg
+)
+dev.off()
