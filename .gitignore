@@ -1,14 +1,15 @@
 # Project directories
 cache
-#data
+data
 logs
 
 # data folder
-#data/*
+data/*
 raw
 work
 results
 .nextflow*
+pipeline_results
 
 # app temp files
 .snakemake/*
