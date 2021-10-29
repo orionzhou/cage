@@ -1,17 +1,48 @@
 source("functions.R")
 dirw = glue("{dird}/10_shift")
-setwd(dirw)
+#setwd(dirw)
+
+#{{{ add stype, IBD, prop_tpm columns to rtss tibble
+fi = glue('{dirw}/03.rep.merged.rds')
+r3 = readRDS(fi)
+rtss=r3$rtss; tss=r3$tss; gtss=r3$gtss
+
+# stype & IBD
+stypes=c('identical','1_snp','2_snp','other')
+fi = glue('{dird}/06_snp/11.tss.vnt.rds')
+tv = readRDS(fi)$tv %>% select(tidx=tid,stype,ibd) %>%
+    mutate(stype=factor(stype,levels=stypes)) %>%
+    mutate(ibd = factor(ibd))
+
+# proportion TPM in multi-TSS gene 
+dtss = rtss %>% filter(!peakType %in% c("intergenic", "antisense")) %>%
+    select(tidx, tpm, gid) %>% group_by(gid) %>%
+    mutate(prop_tpm = tpm/sum(tpm)) %>% ungroup() %>%
+    select(tidx, prop_tpm)
+
+rtss2 = rtss %>% inner_join(tv, by='tidx') %>%
+    left_join(dtss, by='tidx') %>%
+    mutate(dominant=ifelse(is.na(prop_tpm), NA, prop_tpm>=.15)) %>%
+    select(tidx, tpm, IQR, entropy, support, tid, peakType, gid,
+        npos, chrom, start, end, srd, peakPos=domi, 
+        vtype=stype, ibd, prop_tpm, dominant,
+        tpm.grp, cidxs, cnts)
+fo = glue("{dirw}/04.rtss.rds")
+saveRDS(rtss2, fo)
+#}}}
 
 #{{{ read shifting scores - tg
+fi = glue("{dirw}/04.rtss.rds")
+rtss = readRDS(fi)
 fi = glue('{dird}/03_qc/05.shift.rds')
 r5 = readRDS(fi)
-tss = r5$tss; gtss = r5$gtss
+ss = r5$rtss; 
 gene = gcfg$gene %>% mutate(loc=glue("{chrom}:{start}-{end}")) %>% select(gid,loc)
 
 itvs = c(seq(0,1,by=.1))
 tags = c("conserved",'variable','highly variable')
-tg = gtss %>% select(i,gid, cmp) %>% unnest(cmp) %>%
-    mutate(cmp = glue("{cond1} {cond2}")) %>%
+tg = tss %>% select(i,gid, cmp) %>% unnest(cmp) %>%
+    mutate(cmp = glue("{grp1} {grp2}")) %>%
     mutate(cmp = as.character(cmp)) %>%
     arrange(cmp, desc(shift)) %>%
     group_by(cmp) %>%
@@ -25,9 +56,41 @@ tg = gtss %>% select(i,gid, cmp) %>% unnest(cmp) %>%
     #mutate(shift = pmax(-1, shift)) %>%
     mutate(bin.shift = cut(shift,breaks=itvs, right=T, include.lowest=T, ordered_result=T)) %>%
     #mutate(sig.ks = padj < 0.05) %>%
-    mutate(tag = ifelse(shift>.5, tags[3], ifelse(shift<=.1, tags[1], tags[2]))) %>%
+    mutate(tag = ifelse(shift>.5, tags[3], ifelse(shift<=.2, tags[1], tags[2]))) %>%
     mutate(tag = factor(tag, levels=tags))
-tg %>% count(cond1,cond2,tag) %>% spread(tag,n)
+tg %>% count(grp1,grp2,tag) %>%
+    group_by(grp1,grp2) %>% mutate(p=n/sum(n)) %>% ungroup() %>%
+    mutate(txt = glue("{n} ({percent(p,accuracy=.1)})")) %>%
+    select(grp1, grp2, tag, txt) %>% spread(tag, txt)
+x = tss %>% select(i,tpm.grp) %>% unnest(tpm.grp) %>% select(i,grp,tpm)
+tg2 = tg %>% inner_join(x, by=c('i'='i','grp1'='grp')) %>% rename(tpm1=tpm) %>%
+    inner_join(x, by=c('i'='i','grp2'='grp')) %>% rename(tpm2=tpm)
+
+cmps = c('root.B root.A', 'shoot.B shoot.A', 'root.B shoot.B', 'root.A shoot.A')
+min_tpm = 3
+tp = tg2 %>% filter(cmp %in% cmps) %>%
+    filter(i %in% tids_domi) %>%
+    filter(tpm1>min_tpm, tpm2>=min_tpm) %>%
+    inner_join(tv, by='i') %>%
+    count(cmp, stype, tag) %>% select(pnl=cmp, tag1=stype, tag2=tag, n)
+    #filter(stype=='identical') %>% count(cmp, ibd, tag) %>% select(pnl=cmp, tag1=ibd, tag2=tag, n)
+tp %>% group_by(pnl, tag1) %>% mutate(p=n/sum(n)) %>% ungroup() %>%
+    mutate(txt = glue("{n} ({percent(p,accuracy=.1)})")) %>%
+    select(pnl,tag1,tag2,txt) %>% spread(tag2, txt)
+tp %>% group_by(pnl) %>% summarise(n=sum(n))
+
+cols5 = pal_simpsons()(8)#[c(3,1,2,4,5)]
+p1 = cmp_proportion(tp, alph=.8, acc=1,
+    lab.size=2, nc=4, oneline=T, fills=cols5, strip.compact=F, panel.spacing=.2,
+    expand.x=c(.02,.02), expand.y=c(.01,.04), legend.title='',
+    legend.pos='top.center.out', legend.dir='h', legend.vjust=-1,
+    margin= c(.5,.1,.1,.1), xtext=T, xtick=T) +
+    theme(axis.text.x=element_text(size=8, color='black'))
+fo = glue("{dirw}/05.3.ibd.pdf")
+fo = glue("{dirw}/05.1.tpm3.pdf")
+fo = glue("{dirw}/05.0.all.pdf")
+fo = glue("{dirw}/05.2.domi.pdf")
+ggsave(p1, filename=fo, width=9, height=4)
 #}}}
 
 #{{{ shifting score distribution
@@ -499,6 +562,32 @@ x = tp %>% filter(tag == 'conserved') %>%
     print(n=20, width=Inf)
 #}}}
 
+
+#{{{ prepare meta table to share
+fi = glue("{dirw}/04.rtss.rds")
+rtss = readRDS(fi)
+fi = glue('{dird}/03_qc/05.shift.rds')
+r5 = readRDS(fi)
+ss = r5$rtss; 
+
+to1 = rtss %>% select(tidx, tpm.grp) %>% unnest(tpm.grp) %>%
+    select(tidx, grp, tpm) %>%
+    mutate(grp = fct_relabel(grp, ~ paste0("tpm.", .x))) %>%
+    spread(grp, tpm)
+
+cmps = ss$cmp[[1]] %>% mutate(cmp = glue("ss-{grp1}-{grp2}")) %>% pull(cmp)
+to2 = ss %>% select(tidx=i, cmp) %>% unnest(cmp) %>%
+    mutate(cmp = glue("ss-{grp1}-{grp2}")) %>%
+    mutate(cmp = factor(cmp, levels=cmps)) %>%
+    select(tidx, cmp, shift) %>% spread(cmp, shift)
+
+to = rtss %>% select(-tpm.grp, -cidxs, -cnts) %>%
+    inner_join(to1, by='tidx') %>%
+    left_join(to2, by='tidx')
+
+fo = glue("{dird}/91_share/01.rtss.tsv")
+write_tsv(to, fo, na='')
+#}}}
 
 #{{{ [old] varaible TSS btw. B, A in F1
 tis = 'root'

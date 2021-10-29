@@ -1,6 +1,8 @@
 source("functions.R")
 require(jsonlite)
-diro = file.path(dird, 'tracks')
+diro = glue('{dird}/tracks')
+dir_s3 = "/datalus/weiyu/projects/s3/zhoup-nfo/zm.cg20a.2"
+org = 'Zmays_B73v5'
 make_cage_track <- function(sid, name, s3_pre) {
     #{{{
     url1 = glue("{s3_pre}/{sid}.plus.bw")
@@ -12,7 +14,77 @@ make_cage_track <- function(sid, name, s3_pre) {
     #}}}
 }
 
-#{{{ IGV track json - raw bigwig
+#{{{ copy bigwig and bam files
+tho = tha %>% mutate(sname = glue("{grp}.{str_pad(grp.x,2,pad='0')}")) %>%
+    select(grp, grp.x, sname, cond, sid)
+
+tho %>%# slice(1:2) %>%
+    mutate(fi=glue("{dir_s3}/34_ctss/{sid}-{org}.plus.bw")) %>%
+    mutate(fo=glue("{diro}/01_bigwig/{sname}.plus.bw")) %>%
+    mutate(j = map2_lgl(fi, fo, file.copy, overwrite=T)) %>%
+    pull(j)
+tho %>%# slice(1:2) %>%
+    mutate(fi=glue("{dir_s3}/34_ctss/{sid}-{org}.minus.bw")) %>%
+    mutate(fo=glue("{diro}/01_bigwig/{sname}.minus.bw")) %>%
+    mutate(j = map2_lgl(fi, fo, file.copy, overwrite=T)) %>%
+    pull(j)
+
+tho %>%# slice(1:2) %>%
+    mutate(fi=glue("{dir_s3}/20_bam/{sid}-{org}.sorted.bam")) %>%
+    mutate(fo=glue("{diro}/01_bam/{sname}.bam")) %>%
+    mutate(j = map2_lgl(fi, fo, file.copy, overwrite=T)) %>%
+    pull(j)
+tho %>%# slice(1:2) %>%
+    mutate(fi=glue("{dir_s3}/20_bam/{sid}-{org}.sorted.bam.csi")) %>%
+    mutate(fo=glue("{diro}/01_bam/{sname}.bam.csi")) %>%
+    mutate(j = map2_lgl(fi, fo, file.copy, overwrite=T)) %>%
+    pull(j)
+
+to = tho %>% rename(group=grp, i=grp.x, sample=sname, condition=cond)
+fo = glue("{diro}/00.meta.tsv")
+write_tsv(to, fo)
+#}}}
+
+#{{{ merge bigwig and bam
+size = glue("/datalus/genomes/{org}/15_intervals/01.chrom.sizes")
+merge_bws <- function(fis, fo, size, minus=F) {
+    #{{{
+    cat(fo, "\n")
+    fi = str_c(fis, sep=" ", collapse=" ")
+    tag = ifelse(minus, "-threshold=-9999999999", '')
+    cmd = glue("bigWigMerge {tag} {fi} tmp.bg")
+    system(cmd)
+    cmd = glue("bedGraphToBigWig tmp.bg {size} {fo}")
+    system(cmd)
+    system("rm tmp.bg")
+    #}}}
+}
+merge_bams <- function(fis, fo) {
+    #{{{
+    cat(fo, "\n")
+    fi = str_c(fis, sep=" ", collapse=" ")
+    cmd = glue("sambamba merge -t 4 {fo} {fi}")
+    system(cmd)
+    #system(glue("sambamba index {fo}"))
+    #}}}
+}
+thfo = tho %>% filter(sid %in% thf$sid) %>%
+    mutate(bw1=glue("{diro}/01_bigwig/{sname}.plus.bw")) %>%
+    mutate(bw2=glue("{diro}/01_bigwig/{sname}.minus.bw")) %>%
+    mutate(bam=glue("{diro}/01_bam/{sname}.bam")) %>%
+    group_by(grp) %>%
+    summarise(bw1=list(bw1), bw2=list(bw2), bam=list(bam)) %>% ungroup() %>%
+    mutate(obw1=glue("{diro}/05_bigwig_merged/{grp}.plus.bw")) %>%
+    mutate(obw2=glue("{diro}/05_bigwig_merged/{grp}.minus.bw")) %>%
+    mutate(obam=glue("{diro}/05_bam_merged/{grp}.bam"))
+
+thfo %>% mutate(j=map2_int(bw1, obw1, merge_bws, size=!!size)) %>% pull(j)
+thfo %>% mutate(j=map2_int(bw2, obw2, merge_bws, size=!!size, minus=T)) %>% pull(j)
+
+thfo %>% mutate(j=map2_int(bam, obam, merge_bams)) %>% pull(j)
+#}}}
+
+#{{{ [old] IGV track json - raw bigwig
 jts = thf %>%
     group_by(Genotype,Tissue) %>% mutate(i = 1:n()) %>% ungroup() %>%
     arrange(Genotype, Tissue) %>%
@@ -37,7 +109,7 @@ fo = glue("{dird}/91_share/00.bigwigs.tsv")
 write_tsv(to, fo)
 #}}}
 
-#{{{ merge replicates + IGV track json
+#{{{ [old] merge replicates + IGV track json
 bw_str <- function(sids, srd='plus')
     str_c(str_c(sids, srd, "bw", sep='.'), collapse=" ")
 x = thf %>% group_by(Genotype,Tissue) %>%

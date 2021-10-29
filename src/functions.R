@@ -12,58 +12,67 @@ dirr = glue('{dird}/raw')
 dirf = glue('{dird}/95_figures/plots')
 gcfg = read_genome_conf()
 #
-fh = glue('{dird}/01.meta.tsv')
+fh = glue('{dird}/00.meta.tsv')
 th0 = read_tsv(fh)
 tgl = gcfg$gene %>% mutate(loc = glue("{chrom}:{start}-{end}")) %>%
     select(gid,ttype,loc)
+peakTypes = c("promoter","proximal",'fiveUTR')
 
 #{{{ process th
-tissues = c('shoot','root','stem','husk')
-gts = c("B73",'LH143',"B73xLH143")
-gts = c("B73",'A632',"B73xA632")
-notes = c("normal",'cold_control','drought_control','2015','cold','drought','AMG','Maike')
-tha = th0 %>% replace_na(list(Treatment='normal')) %>%
-    mutate(Genotype = str_replace(Genotype, 'LH143','A632')) %>%
-    mutate(Tissue=factor(Tissue, levels=tissues)) %>%
-    mutate(Genotype=factor(Genotype, levels=gts)) %>%
-    mutate(Treatment=factor(Treatment, levels=notes)) %>%
-    arrange(Tissue, Genotype, Treatment) %>%
-    mutate(lab = str_c(Tissue,Genotype,Treatment,Replicate, sep='_'))
-th = tha %>%
-    filter(!Treatment %in% c('2015','cold','drought'))
-th %>% dplyr::count(Tissue, Genotype, Treatment) %>% print(n=20)
+tiss = c('shoot','root','stem','husk')
+gts = c("B73",'A632',"F1")
+conds = c("r",'cold.ck','drought.ck','2015','cold','drought','AMG')
+tha = th0 %>%
+    rename(sid=SampleID, tis=Tissue, gt=Genotype, cond=Treatment, rep=Replicate) %>%
+    mutate(gt = ifelse(gt=='B73xA632', 'F1', gt)) %>%
+    mutate(tis = factor(tis, levels=tiss)) %>%
+    mutate(gt = factor(gt, levels=gts)) %>%
+    replace_na(list(cond='r')) %>%
+    mutate(cond=str_replace(cond, "_control", ".ck")) %>%
+    mutate(cond=ifelse(cond == 'Maike', 'r', cond)) %>%
+    mutate(cond = factor(cond, levels=conds)) %>%
+    select(sid,tis,gt,cond,rep,spots,avgLength) %>%
+    arrange(tis, gt, cond, rep) %>%
+    mutate(pnl = glue("{tis}.{gt}.{cond}.{rep}")) %>%
+    mutate(pnl = as_factor(pnl)) %>%
+    mutate(grp = glue("{tis}.{gt}"), grp.xlab = glue("{cond}.{rep}")) %>%
+    mutate(grp = as_factor(grp)) %>%
+    group_by(grp) %>% mutate(grp.x = 1:n()) %>% ungroup()
+th = tha %>% filter(!cond %in% c('2015','cold','drought'))
+th %>% dplyr::count(tis, gt, cond) %>% print(n=20)
+gt_map = c("B73"='B','A632'='A','F1'='H')
 thf = th %>%
-    filter(Tissue %in% c("stem", "husk") | Treatment %in% c("normal",'cold_control','drought_control')) %>%
-    filter(!SampleID %in% c("s22",'s24','s25'))
-thfs = thf %>% distinct(Genotype, Tissue) %>% arrange(Genotype,Tissue) %>%
-    mutate(cond.s = c("Bs","Br",'Bstem','Bhusk','As','Ar','Hs','Hr')) %>%
-    mutate(cond.l = str_c(Genotype, Tissue, sep=':')) %>%
-    mutate(cond.s=fct_inorder(cond.s), cond.l=fct_inorder(cond.l))
-thf = thf %>% inner_join(thfs, by=c('Genotype','Tissue')) %>%
-    select(SampleID,Genotype,Tissue,Treatment,Replicate,lab,cond.s,cond.l)
+    filter(tis %in% c("shoot", "root"), cond %in% c("r",'cold.ck','drought.ck')) %>%
+    #filter(!sid %in% c("s22","s25")) %>%
+    filter(!sid %in% c("s22")) %>%
+    select(sid,tis,gt,spots,avgLength,note=grp.xlab) %>%
+    mutate(gt2 = gt_map[gt]) %>% mutate(gt2=factor(gt2, levels=gt_map)) %>%
+    group_by(tis,gt) %>% mutate(rep=1:n()) %>% ungroup() %>%
+    mutate(grp = glue("{tis}.{gt2}")) %>% mutate(grp = as_factor(grp)) %>%
+    mutate(cond = glue("{tis}.{gt2}.{rep}")) %>% mutate(cond = as_factor(cond)) %>%
+    select(sid,tis,gt,gt2,cond,grp,rep,note) %>% print(n=40)
+#
 shapes = c('single (1 bp)', 'steep  (2-10 bp)', 'broad  (>= 10 bp)')
 shapess = c('single', 'steep', 'broad')
 #{{{ comparisons
 cmps = tibble(cmp = c(
-"Br Bs",
-"Bstem Bs",
-"Bhusk Bs",
-"Ar Bs",
-"As Bs",
-"Ar Br",
-"Ar As",
-"Hr Br",
-"Hr Ar",
-"Hr Cr",
-"Hs Bs",
-"Hs As",
-"Hs Cs")) %>%
-    separate(cmp, c("cond1",'cond2'), sep=' ', remove=F) %>%
-    mutate(cmp = as_factor(cmp)) %>%
-    left_join(thfs %>% select(cond1=cond.s,cond1.l=cond.l), by='cond1') %>%
-    left_join(thfs %>% select(cond2=cond.s,cond2.l=cond.l), by='cond2') %>%
-    mutate(cmp.l=glue("{cond1.l} vs {cond2.l}")) %>%
-    mutate(cmp.l = as_factor(cmp.l))
+"root.B shoot.B",
+"root.A shoot.A",
+"root.B root.A",
+"shoot.B shoot.A",
+"root.H root.B",
+"root.H root.A",
+"root.H root.C",
+"shoot.H shoot.B",
+"shoot.H shoot.A",
+"shoot.H shoot.C"
+)) %>%
+    separate(cmp, c("grp1",'grp2'), sep=' ', remove=F) %>%
+    mutate(cmp = as_factor(cmp))# %>%
+    #left_join(thf %>% select(cond1=cond.s,cond1.l=cond.l), by='cond1') %>%
+    #left_join(thf %>% select(cond2=cond.s,cond2.l=cond.l), by='cond2') %>%
+    #mutate(cmp.l=glue("{cond1.l} vs {cond2.l}")) %>%
+    #mutate(cmp.l = as_factor(cmp.l))
 #}}}
 cmps5 = cmps$cmp[1:5]
 cmps4 = cmps$cmp[c(1,7,5,6)]
@@ -72,10 +81,10 @@ cols_shift = brewer.pal(5, 'Accent')
 cols_var = pal_d3()(5)
 #}}}
 #
-read_cage_bws <- function(diri, dsg, minSupport=2) { # dsg is a df with 'Name'
+read_cage_bws <- function(diri, dsg, minSupport=2, genome='Zmays_B73v5') { # dsg is a df with 'Name'
     #{{{ read in, remove singletons
-    fps = glue("{diri}/{dsg$Name}.plus.bw")
-    fms = glue("{diri}/{dsg$Name}.minus.bw")
+    fps = glue("{diri}/{dsg$Name}-{genome}.plus.bw")
+    fms = glue("{diri}/{dsg$Name}-{genome}.minus.bw")
     rownames(dsg) = dsg$Name
     names(fps) = dsg$Name; names(fms) = dsg$Name
     #
@@ -98,16 +107,17 @@ make_tss <- function(SE_ctss, txdb, pooledCutoff=.1, unexpressed=.1, minSamples=
     #tc %>% as_tibble %>% filter(seqnames=='B01', start >= 55500, end <= 55800)
     #tc %>% as_tibble %>% filter(seqnames=='B01', start >= 199000, end <= 199200)
     SE_tss_raw = SE_ctss %>% quantifyClusters(clusters=tc, inputAssay='counts') %>%
-        calcTPM(totalTags='totalTags') %>%
+        calcTotalTags() %>%
+        calcTPM() %>%
         calcPooled()
     #
     SE_tss = SE_tss_raw %>%
-        #subsetBySupport(inputAssay='TPM',unexpressed=.1,minSamples=2) %>%
         subsetBySupport(inputAssay='TPM',unexpressed=unexpressed,minSamples=minSamples) %>%
-        calcTPM(totalTags='totalTags') %>%
+        calcTPM() %>%
         calcPooled() %>%
         calcShape(pooled=SE_ctss, outputColumn='IQR', shapeFunction=shapeIQR,
             lower=.1, upper=.9) %>%
+        calcShape(pooled=SE_ctss, outputColumn='entropy', shapeFunction=shapeEntropy) %>%
         assignTxID(txModels=txdb, outputColumn='txID') %>%
         assignTxType(txModels=txdb, outputColumn='peakTxType', swap='thick') %>%
         assignGeneID(geneModels=txdb, outputColumn='geneID')
